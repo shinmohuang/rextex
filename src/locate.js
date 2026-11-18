@@ -14,6 +14,18 @@ const INLINE = /\\\((.{1,400}?)\\\)|(?<![\\$\w])\$(?![\s$])([^$]{1,400}?)(?<![\s
 
 const isBlank = (line) => line === undefined || /^[\s]*$/.test(line);
 
+// Whether the text between two display delimiters on different rows is a
+// formula, not a paragraph that happens to sit between two formulas.
+function plausibleDisplay(tex, nextLine, sameLine) {
+  // A paragraph is set off by a blank row; a formula follows its delimiter directly.
+  if (sameLine.trim() === '' && isBlank(nextLine)) return false;
+  // Inline delimiters inside mean this is prose with math in it.
+  if (/(?<!\\)\$/.test(tex) || /\\\(/.test(tex)) return false;
+  // CJK text belongs in \text{...} when it is part of a formula.
+  if (/[\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]/.test(tex) && !/\\(text|mathrm|mbox|textbf|textit)\b/.test(tex)) return false;
+  return looksLikeMath(tex);
+}
+
 /**
  * @param {string[]} lines the rows of the screen, top to bottom
  * @returns {{ tex: string, display: boolean, row: number, rows: number, col: number, cols: number }[]}
@@ -48,6 +60,11 @@ export function locateFormulas(lines) {
     parts[parts.length - 1] = tail.slice(0, end);
     let tex = parts.map((part) => part.trim()).filter(Boolean).join(' ');
     if (!tex) continue;
+    // When the top of a formula has scrolled off, its closing `$$` is the
+    // first one on screen, and pairing it with the next `$$` would take the
+    // prose between two formulas for math. Skip a pair like that, so the next
+    // `$$` gets its turn as an opener.
+    if (!open[3] && last > row && !plausibleDisplay(tex, lines[row + 1], parts[0])) continue;
     if (open[3]) tex = `${opener} ${tex} ${closer}`.replace(/\\label\{[^}]*\}/g, '').replace(/\s+/g, ' ');
     let width = 0;
     for (let r = row; r <= last; r++) width = Math.max(width, stringWidth(lines[r]));

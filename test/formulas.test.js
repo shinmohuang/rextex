@@ -57,3 +57,30 @@ test('a tile is refused when the formula would shrink too far', () => {
   assert.equal(renderTile(math, { ...box, rows: 1 }), null);
   assert.ok(renderTile(math, { ...box, rows: 4 }));
 });
+
+test('a closing $$ at the top of the screen does not pair with the next opener', () => {
+  const lines = [
+    String.raw`  \ell(s) \le P(s) \le u(s)`,
+    '  $$',
+    '',
+    String.raw`  设 $\mathcal{C}(s)$ 是所有允许的分布：`,
+    '',
+    '  $$',
+    String.raw`  U(s) = \max_{P} \sum_{s'} P(s, s') U(s')`,
+    '  $$',
+    '',
+    '  and then, with no blank row before it,',
+    '  $$',
+    String.raw`  L(s) \le U(s)`,
+    '  $$',
+  ];
+  const found = locateFormulas(lines);
+  assert.deepEqual(
+    found.map((f) => [f.display, f.tex]),
+    [
+      [true, String.raw`U(s) = \max_{P} \sum_{s'} P(s, s') U(s')`],
+      [true, String.raw`L(s) \le U(s)`],
+      [false, String.raw`\mathcal{C}(s)`],
+    ],
+  );
+});
