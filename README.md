@@ -1,104 +1,110 @@
 # rextex
 
-在 [Rex](https://www.superlogical.com/rex/docs) 里把 LaTeX 公式显示成真正排版好的数学公式。
+See LaTeX formulas as real, typeset math in [Rex](https://www.superlogical.com/rex/docs) terminal panes.
 
-> 非官方插件，与 Superlogical 无关。Rex 仍在测试阶段，接口可能变化。
+English | [中文](README.zh-CN.md)
 
-终端里的公式通常只是一串源码，比如 `$\frac{n(n+1)}{2}$`。rextex 读取某个面板屏幕上的文字（或一个 `.tex` / `.md` 文件），找出其中的公式，用 MathJax 排版后以图片形式画在旁边的面板里，并随内容变化持续更新。不需要安装 TeX。
+> An unofficial plugin, not affiliated with Superlogical. Rex is in beta and its interfaces may change.
 
-## 安装
+In a terminal, a formula is usually just its source, such as `$\frac{n(n+1)}{2}$`. rextex reads the text on a pane's screen, finds the formulas, typesets them with MathJax, and draws each one as an image over its own source. The images follow the screen as it changes. You can also list the formulas at a larger size in a second pane, or follow a `.tex` or `.md` file. No TeX installation is needed.
 
-需要 Node.js 18 以上，以及 macOS / Linux 上的 Rex。
+## Install
+
+rextex needs Node.js 18 or later and Rex on macOS or Linux.
 
 ```sh
 git clone https://github.com/shinmohuang/rextex.git
 cd rextex
-./install.sh                 # 安装，快捷键 cmd+shift+m
-./install.sh --key cmd+e     # 换一个快捷键
-./install.sh --no-config     # 不改 init.lua，自己手动加
-./install.sh --uninstall     # 卸载
+./install.sh                 # install, bound to cmd+shift+m
+./install.sh --key cmd+e     # use another key
+./install.sh --no-config     # leave init.lua alone and add the line yourself
+./install.sh --uninstall     # remove everything the script added
 ```
 
-安装脚本做四件事：
+The install script does four things:
 
-- 在 `~/.local/bin/rextex` 写一个启动脚本；
-- 把 `rex/rextex.lua` 链接到 `~/.config/rex/rextex.lua`；
-- 在 `~/.config/rex/init.lua` 末尾加一段带标记的配置（原文件备份为 `init.lua.rextex-backup`）；
-- 如果有 `~/.claude`，把写作 skill 链接到 `~/.claude/skills/rextex-math`。它告诉 Claude Code 怎样排公式源码（独立公式分三行写、前后空一行等），原地渲染才有足够的行数。新开的对话才会加载。
+- It writes a launcher at `~/.local/bin/rextex`.
+- It links `rex/rextex.lua` to `~/.config/rex/rextex.lua`.
+- It appends a marked block to `~/.config/rex/init.lua`, after saving the original as `init.lua.rextex-backup`.
+- If `~/.claude` exists, it links the writing skill to `~/.claude/skills/rextex-math`. The skill tells Claude Code how to lay out formula source, for example a display formula on three lines with a blank line before and after, so that in-place rendering has enough rows to draw in. Only new conversations load it.
 
-移动了本目录或换了 Node 版本后，重新运行一次 `./install.sh`。
+Run `./install.sh` again after you move this folder or change your Node version.
 
-## 使用
+## Use
 
-**原地渲染（默认快捷键）：** 聚焦到有公式的面板，按 `cmd+shift+m`，或在命令面板里搜 “LaTeX: Render Formulas in Place”。公式会直接画在它自己的源码上面，随屏幕内容实时更新；再按一次恢复显示源码。
+### Render in place
 
-- 行内公式只占原来那一行；独占一行的公式会借用上下的空行，所以能画得大一些。
-- 放不下的公式（比如一行里的大分式）、没写完或有语法错误的公式保持源码不动。
-- 颜色取自终端主题，第一次使用时会闪一下小分屏来测量；换了主题后在任意面板运行 `rextex theme` 重新测量。
+Focus a pane that shows formulas and press `cmd+shift+m`, or search the command palette for "LaTeX: Render Formulas in Place". Each formula is drawn over its own source and follows the screen as it changes. Press the key again to see the source.
 
-**单独的公式面板：** 命令面板里搜 “LaTeX: Show Formulas in This Pane”，右侧打开一个面板，把公式列出来并画得更大。想绑定按键就在配置里加 `preview_key`。
+- Inline math keeps to its one row. A display formula also uses the blank rows above and below it, so it can be drawn larger.
+- A formula that doesn't fit, such as a tall fraction on a single row, stays as source. So does one that is unfinished or has a syntax error.
+- The colors come from your terminal theme. The first time you use it, a small split flashes open to measure them. After you change the theme, run `rextex theme` in any pane to measure again.
 
-**命令行：**
+### List formulas in a second pane
+
+Search the command palette for "LaTeX: Show Formulas in This Pane". A pane opens on the right that lists the formulas at a larger size. To bind a key to it, set `preview_key` in the configuration.
+
+Keys in that pane:
+
+| Key | Action |
+| --- | --- |
+| `j` / `k`, arrow keys, mouse wheel | Scroll |
+| Space / `b`, `d` / `u` | Page / half page |
+| `g` / `G` | Top / end (at the end, the list follows new formulas) |
+| `+` / `-` / `0` | Zoom in / zoom out / reset |
+| `y` | Copy the LaTeX source of the formula at the top |
+| `c` | Clear the list |
+| `q` | Quit |
+
+While the pane follows another pane, a formula stays in the list after it scrolls off the screen.
+
+### Command line
 
 ```sh
-rextex inline --block BLOCK           # 在某个面板里原地渲染（--on / --off）
-rextex view paper.tex                 # 在当前面板里跟随一个文件
-rextex view --block BLOCK             # 跟随一个面板
-rextex show '\int_0^1 x^2\,dx'        # 直接画在当前终端里
-rextex list paper.tex                 # 只列出找到的公式（纯文本）
+rextex inline --block BLOCK           # render in place in a pane (--on / --off)
+rextex view paper.tex                 # follow a file, in this pane
+rextex view --block BLOCK             # follow another pane
+rextex show '\int_0^1 x^2\,dx'        # draw a formula right here
+rextex list paper.tex                 # print the formulas found, as text
 ```
 
-查看器里的按键：
+## What it recognizes
 
-| 键 | 作用 |
-| --- | --- |
-| `j` / `k`、方向键、鼠标滚轮 | 滚动 |
-| 空格 / `b`，`d` / `u` | 翻页 / 半页 |
-| `g` / `G` | 顶部 / 底部（在底部时自动跟随新公式） |
-| `+` / `-` / `0` | 放大 / 缩小 / 还原 |
-| `y` | 复制最上面那条公式的 LaTeX 源码 |
-| `c` | 清空列表 |
-| `q` | 退出 |
+rextex finds math between `$…$`, `$$…$$`, `\(…\)`, and `\[…\]`, and in environments such as `equation`, `align`, `gather`, `multline`, `cases`, and the `matrix` family. When listing formulas, it rejoins one that the terminal broke across lines.
 
-## 能识别什么
+`$…$` also appears in shell text and prices, so it counts as a formula only when its content reads as math. `$5 and $10` and `"$HOME"` are skipped.
 
-`$…$`、`$$…$$`、`\(…\)`、`\[…\]`，以及 `equation`、`align`、`gather`、`multline`、`cases`、各种 `matrix` 等环境。被终端硬换行截断的公式会自动拼回去。
-
-`$…$` 在 shell 文本和价格里也会出现，所以只有内容看起来像数学时才算公式，例如 `$5 and $10` 和 `"$HOME"` 会被跳过。
-
-跟随面板时，看过的公式会一直留在列表里，即使它已经滚出屏幕。
-
-## 配置
+## Configure
 
 ```lua
 require("rextex").setup{
-  key   = "cmd+shift+m",  -- 原地渲染的按键；不写则只出现在命令面板
-  preview_key = nil,      -- 单独公式面板的按键
-  inline_zoom = 1,        -- 原地渲染时公式的大小
-  where = "right",        -- "right"、"below" 或 "float"（浮动层）
-  ratio = 0.4,            -- 查看器占的比例
-  zoom  = 1.3,            -- 公式相对文字的大小
+  key   = "cmd+shift+m",  -- key for in-place rendering; leave out for palette only
+  preview_key = nil,      -- key for the separate formula pane
+  inline_zoom = 1,        -- formula size for in-place rendering
+  where = "right",        -- formula pane: "right", "below", or "float"
+  ratio = 0.4,            -- share of the space the formula pane gets
+  zoom  = 1.3,            -- formula size in the formula pane, relative to the text
 }
 ```
 
-## 限制
+## Limits
 
-- 需要终端支持 kitty 图形协议（Rex 支持）。
-- 原地渲染要求 rextex 装在会话所在的那台机器上（远程主机要在那边再装一次）。
-- 原地渲染的做法（直接写面板的 tty 设备）来自 [herdr-math](https://github.com/liambern/herdr-math)。
-- 只渲染数学公式，不渲染整篇文档；写在导言区（公式之外）的 `\newcommand` 自定义宏读不到，用到它们的公式会报错。
-- 语法错误的公式会显示错误信息，而不是图片。
-- 如果程序把 `\[` 显示成了 `[`（有些 Markdown 渲染器会吃掉反斜杠），屏幕上就没有可识别的定界符了。
+- The terminal must support the kitty graphics protocol. Rex does.
+- In-place rendering can't move text. A formula gets the rows its source occupies, plus neighboring blank rows for display math. The `rextex-math` skill exists to make Claude Code leave enough room.
+- In-place rendering runs on the machine the session runs on. For a session on a remote host, install rextex on that host.
+- rextex draws math, not whole documents. It doesn't see macros defined with `\newcommand` outside a formula, and a formula that uses one is reported as an error.
+- In the formula pane, a formula with a syntax error shows the error message in place of an image.
+- If a program shows `\[` as `[`, as some Markdown renderers do when they remove backslashes, no delimiter is left on screen to recognize.
 
-## 开发
+## Develop
 
 ```sh
 npm install
 npm test
 ```
 
-## 致谢与许可
+## Credits and license
 
-原地渲染“直接写面板 tty 设备”的做法来自 [liambern/herdr-math](https://github.com/liambern/herdr-math)。公式排版用 [MathJax](https://www.mathjax.org)，栅格化用 [resvg-js](https://github.com/yisibl/resvg-js)。
+The technique for in-place rendering, writing kitty graphics to the pane's tty device, comes from [liambern/herdr-math](https://github.com/liambern/herdr-math). Formulas are typeset with [MathJax](https://www.mathjax.org) and rasterized with [resvg-js](https://github.com/yisibl/resvg-js).
 
 [MIT](LICENSE)
