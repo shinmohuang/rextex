@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { extractFormulas } from '../src/extract.js';
+import { Graphics } from '../src/inline.js';
 import { locateFormulas } from '../src/locate.js';
 import { renderFormula, renderTile, typeset } from '../src/render.js';
 
@@ -83,4 +84,37 @@ test('a closing $$ at the top of the screen does not pair with the next opener',
       [false, String.raw`\mathcal{C}(s)`],
     ],
   );
+});
+
+test('images follow the screen: moved when text moves, kept when it scrolls into history', () => {
+  const graphics = new Graphics();
+  const png = Buffer.from('x');
+  const at = (key, row) => ({ key, png, row, col: 2, cols: 10, rows: 3 });
+  const count = (out, pattern) => (out.match(pattern) || []).length;
+
+  let out = graphics.update([at('a', 5), at('b', 12)], false);
+  assert.equal(count(out, /a=t,/g), 2);
+  assert.equal(count(out, /a=p,/g), 2);
+
+  // Nothing changed: nothing is written.
+  assert.equal(graphics.update([at('a', 5), at('b', 12)], false), '');
+
+  // The program redrew its screen two rows up (alternate screen): both move.
+  out = graphics.update([at('a', 3), at('b', 10)], false);
+  assert.equal(count(out, /a=p,/g), 2);
+  assert.equal(count(out, /a=d,/g), 0);
+
+  // The terminal scrolled four rows (main screen). 'a' left the top and is
+  // kept for the scrollback; 'b' was carried along and needs no command.
+  out = graphics.update([at('b', 6)], false, 4);
+  assert.equal(out, '');
+
+  // 'b' is erased by the program: its placement and image go, 'a' stays.
+  out = graphics.update([], false);
+  assert.equal(count(out, /a=d,d=i,/g), 1);
+  assert.equal(count(out, /a=d,d=I,/g), 1);
+
+  // The same formula again gets a placement number of its own.
+  out = graphics.update([at('a', 8)], false);
+  assert.match(out, /a=p,i=\d+,p=3,/);
 });

@@ -117,49 +117,73 @@ export async function currentTheme(session, block) {
 
 // What is on the pane's terminal: images uploaded once, placed where the
 // formulas are, moved when the text moves, and removed when it goes away.
-class Graphics {
+//
+// On the main screen, text scrolls up into the scrollback and the terminal
+// carries the images with it. `shift` says how many rows that was since the
+// last update. A placement that has left the top of the screen that way is
+// left alone, so the formula is still drawn when the user scrolls back to it.
+export class Graphics {
   constructor() {
     this.ids = new Map(); // tile key -> image id
-    this.placed = new Map(); // "id:n" -> "row,col,cols,rows"
+    this.placed = []; // what is on screen: { id, p, row, col, cols, rows }
+    this.kept = new Set(); // image ids with a placement in the scrollback
     // A base unlikely to collide with images the program itself shows.
     this.nextId = 0x52580000 + Math.floor(Math.random() * 0x8000) * 2;
+    // Placement numbers are never reused: one in the scrollback keeps its own.
+    this.nextPlacement = 1;
   }
 
-  update(placements, force) {
+  update(placements, force, shift = 0) {
     let out = '';
-    const desired = new Map();
-    const copies = new Map();
-    for (const p of placements) {
-      let id = this.ids.get(p.key);
+    const place = (e) =>
+      `${ESC}[${e.row + 1};${e.col + 1}H${ESC}_Ga=p,i=${e.id},p=${e.p},c=${e.cols},r=${e.rows},C=1,q=2${ESC}\\`;
+
+    // Where the previous placements are now.
+    const previous = [];
+    for (const entry of this.placed) {
+      entry.row -= shift;
+      if (entry.row < 0) this.kept.add(entry.id); // gone into the scrollback, whole or in part
+      else previous.push(entry);
+    }
+
+    const next = [];
+    for (const wanted of placements) {
+      let id = this.ids.get(wanted.key);
       if (id === undefined) {
         id = this.nextId++;
-        this.ids.set(p.key, id);
-        const data = p.png.toString('base64');
+        this.ids.set(wanted.key, id);
+        const data = wanted.png.toString('base64');
         for (let offset = 0; offset < data.length; offset += 4096) {
           const more = offset + 4096 < data.length ? 1 : 0;
           const keys = offset === 0 ? `a=t,f=100,i=${id},q=2,m=${more}` : `q=2,m=${more}`;
           out += `${ESC}_G${keys};${data.slice(offset, offset + 4096)}${ESC}\\`;
         }
       }
-      const n = (copies.get(id) || 0) + 1;
-      copies.set(id, n);
-      const where = `${p.row},${p.col},${p.cols},${p.rows}`;
-      desired.set(`${id}:${n}`, where);
-      if (force || this.placed.get(`${id}:${n}`) !== where) {
-        out += `${ESC}[${p.row + 1};${p.col + 1}H${ESC}_Ga=p,i=${id},p=${n},c=${p.cols},r=${p.rows},C=1,q=2${ESC}\\`;
+      const same = (e) => e.id === id && e.row === wanted.row && e.col === wanted.col && e.cols === wanted.cols && e.rows === wanted.rows;
+      let index = previous.findIndex(same);
+      if (index >= 0) {
+        // Already there, moved by the terminal or not moved at all.
+        const [entry] = previous.splice(index, 1);
+        if (force) out += place(entry);
+        next.push(entry);
+        continue;
       }
+      // The same image elsewhere on screen: move it. Otherwise a new placement.
+      index = previous.findIndex((e) => e.id === id);
+      const p = index >= 0 ? previous.splice(index, 1)[0].p : this.nextPlacement++;
+      const entry = { id, p, row: wanted.row, col: wanted.col, cols: wanted.cols, rows: wanted.rows };
+      out += place(entry);
+      next.push(entry);
     }
-    for (const key of this.placed.keys()) {
-      if (desired.has(key)) continue;
-      const [id, n] = key.split(':');
-      out += `${ESC}_Ga=d,d=i,i=${id},p=${n},q=2${ESC}\\`;
-    }
+
+    for (const entry of previous) out += `${ESC}_Ga=d,d=i,i=${entry.id},p=${entry.p},q=2${ESC}\\`;
+    const used = new Set(next.map((entry) => entry.id));
     for (const [key, id] of this.ids) {
-      if (copies.has(id)) continue;
+      if (used.has(id) || this.kept.has(id)) continue;
       out += `${ESC}_Ga=d,d=I,i=${id},q=2${ESC}\\`;
       this.ids.delete(key);
     }
-    this.placed = desired;
+    this.placed = next;
     // Save and restore the cursor so the program never sees it move.
     return out && `${ESC}7${out}${ESC}8`;
   }
@@ -168,7 +192,8 @@ class Graphics {
     let out = '';
     for (const id of this.ids.values()) out += `${ESC}_Ga=d,d=I,i=${id},q=2${ESC}\\`;
     this.ids.clear();
-    this.placed = new Map();
+    this.placed = [];
+    this.kept.clear();
     return out;
   }
 }
@@ -212,10 +237,12 @@ export async function runInline({ session, block, zoom = 1, density = 2, style =
   for (const signal of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(signal, () => finish(0));
 
   // Lay the formulas of one screen over their source.
-  const draw = ({ text, size, theme }, force) => {
+  const draw = ({ text, size, theme, total }, force, shift = 0) => {
     const { columns, rows, cell_width_px: cellW, cell_height_px: cellH } = size;
     let lines = text.split('\n');
-    if (lines[lines.length - 1] === '') lines.pop();
+    // The text stops at the last row with something on it. `total` counts
+    // every row, so pad to it before taking the screen off the end.
+    while (lines.length < total) lines.push('');
     if (lines.length > rows) lines = lines.slice(lines.length - rows); // the screen is the end of the scrollback
     const placements = [];
     for (const formula of locateFormulas(lines)) {
@@ -274,7 +301,7 @@ export async function runInline({ session, block, zoom = 1, density = 2, style =
       }
       if (png) placements.push({ key, png, row: formula.row, col, cols, rows: formula.rows });
     }
-    const out = graphics.update(placements, force);
+    const out = graphics.update(placements, force, shift);
     // One write, so the terminal gets it whole, between the program's own writes.
     if (out) fs.writeSync(fd, out);
   };
@@ -283,6 +310,7 @@ export async function runInline({ session, block, zoom = 1, density = 2, style =
   // than they are drawn; only the latest one matters.
   let latest = null;
   let pending = false;
+  let drawnTotal = null;
   const schedule = () => {
     if (pending || stopped) return;
     pending = true;
@@ -290,7 +318,11 @@ export async function runInline({ session, block, zoom = 1, density = 2, style =
       pending = false;
       if (!latest || stopped) return;
       try {
-        draw(latest, false);
+        // On the main screen, the rows added to the scrollback since the last
+        // draw are how far the terminal has scrolled the images.
+        const shift = latest.main && drawnTotal !== null && latest.total > drawnTotal ? latest.total - drawnTotal : 0;
+        drawnTotal = latest.total;
+        draw(latest, false, shift);
       } catch (error) {
         // The pane's terminal is gone.
         process.stderr.write(`rextex inline ${block}: ${error.message}\n`);
@@ -336,7 +368,10 @@ export async function runInline({ session, block, zoom = 1, density = 2, style =
         ? { fg: report.fg, bg: report.bg }
         : { fg: '#d0d0d0', bg: '#101010' };
       const theme = { fg: live.fg, bg: shades()[schemeOf(live.bg)] || live.bg, themeBg: live.bg };
-      latest = { text: report.text, size: report.size, theme };
+      const main = report.screen !== 'alternate';
+      // The alternate screen has no scrollback: its rows are all there is.
+      const total = main && Number.isInteger(report.total) ? report.total : report.size.rows;
+      latest = { text: report.text, size: report.size, theme, main, total };
       schedule();
     });
     child.on('exit', () => {

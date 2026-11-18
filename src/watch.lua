@@ -8,7 +8,8 @@
 --
 -- Each report is one line of JSON on standard output:
 --   { "text": the screen and scrollback, "size": the pane's size,
---     "fg": theme foreground, "bg": theme background }
+--     "fg": theme foreground, "bg": theme background,
+--     "screen": "primary" or "alternate", "total": rows of scrollback and screen }
 -- A line is written only when something in it has changed.
 
 local session_id, block_id = rex.session_id, rex.block_id
@@ -23,7 +24,7 @@ local ACTIVE_FOR = 1.5
 local SLOW_EVERY = 1.0     -- size and theme change rarely
 
 local last_text, last_slow = nil, ""
-local size, fg, bg = nil, nil, nil
+local size, fg, bg, screen, total = nil, nil, nil, nil, nil
 local slow_at, changed_at = -1e9, os.clock()
 local failures = 0
 local started = os.time()
@@ -49,7 +50,9 @@ while true do
       end
       bg, fg = entry(16), entry(231)
     end
-    local slow = rex.json.encode({ size = size, fg = fg, bg = bg })
+    local m = method("modes")
+    if m and m.screen then screen = m.screen end
+    local slow = rex.json.encode({ size = size, fg = fg, bg = bg, screen = screen })
     if slow ~= last_slow then
       last_slow = slow
       changed = true
@@ -69,16 +72,28 @@ while true do
     if r.content ~= last_text then
       last_text = r.content
       changed = true
+      if screen ~= "alternate" then
+        -- The text leaves out blank rows at the bottom of the screen. The
+        -- escape-sequence form has every row, so its row count tells where
+        -- the screen starts.
+        local v = method("format", { format = "vt" })
+        if v and v.content then
+          local _, breaks = v.content:gsub("\r\n", "")
+          total = breaks + 1
+        end
+      end
     end
   end
 
   if changed and last_text and size then
-    io.write(rex.json.encode({ text = last_text, size = size, fg = fg, bg = bg }), "\n")
+    io.write(rex.json.encode({ text = last_text, size = size, fg = fg, bg = bg, screen = screen, total = total }), "\n")
     io.flush()
     changed_at = now
   end
 
   local pause = (now - changed_at < ACTIVE_FOR) and ACTIVE_SLEEP or IDLE_SLEEP
+  -- A long scrollback makes every read bigger. Read less often as it grows.
+  if last_text then pause = pause + #last_text / 50000 * 0.001 end
   rex.sleep(pause)
   now = now + pause
 end
