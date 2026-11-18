@@ -21,6 +21,7 @@ Usage:
   rextex show 'LATEX'...                          draw formulas right here, in the scrollback
   rextex list [--block BLOCK | FILE]              print the formulas found, as text
   rextex theme                                    measure this terminal's colors for inline mode
+  rextex theme --bg '#RRGGBB' [--fg '#RRGGBB']    set those colors by hand
 
 Options:
   -b, --block BLOCK      the Rex pane to read
@@ -53,6 +54,8 @@ try {
       on: { type: 'boolean' },
       off: { type: 'boolean' },
       foreground: { type: 'boolean' },
+      fg: { type: 'string' },
+      bg: { type: 'string' },
       help: { type: 'boolean', short: 'h' },
     },
   });
@@ -105,7 +108,7 @@ if (command === 'view') {
   let stripComments = false;
   if (values.block) {
     try {
-      text = await capture(session, values.block, { trim: true });
+      text = await capture(session, values.block, { trim: true, unwrap: true });
     } catch (error) {
       fail(`rex capture failed: ${error.message}`);
     }
@@ -174,6 +177,23 @@ if (command === 'view') {
       process.stdout.write('on\n');
     }
   }
+} else if (command === 'theme' && (values.fg || values.bg)) {
+  // Set by hand, for a terminal that draws its background in a different
+  // shade from the one it reports.
+  const hex = /^#[0-9a-f]{6}$/i;
+  for (const name of ['fg', 'bg']) {
+    if (values[name] && !hex.test(values[name])) fail(`--${name} takes a color such as #1d1d21, not "${values[name]}"`);
+  }
+  let theme = {};
+  try {
+    theme = JSON.parse(fs.readFileSync(themeFile, 'utf8'));
+  } catch {
+    // Nothing measured yet.
+  }
+  theme = { fg: values.fg || theme.fg || '#d0d0d0', bg: values.bg || theme.bg || '#101010' };
+  fs.mkdirSync(path.dirname(themeFile), { recursive: true });
+  fs.writeFileSync(themeFile, JSON.stringify(theme) + '\n');
+  process.stdout.write(`foreground ${theme.fg}, background ${theme.bg}\n`);
 } else if (command === 'theme') {
   if (!process.stdin.isTTY || !process.stdout.isTTY) fail('theme needs a terminal; run it in a Rex pane');
   process.stdin.setRawMode(true);

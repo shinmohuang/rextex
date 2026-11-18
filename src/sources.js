@@ -18,7 +18,7 @@ export function blockSource({ block, session, intervalMs = 1000 }) {
       const poll = () => {
         if (busy) return;
         busy = true;
-        capture(session, block, { trim: true }).then(
+        capture(session, block, { trim: true, unwrap: true }).then(
           (text) => {
             busy = false;
             if (text === last) return;

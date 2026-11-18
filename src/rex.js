@@ -28,9 +28,13 @@ export function rexSync(args) {
   return execFileSync(REX, args, { ...LIMITS, stdio: ['ignore', 'pipe', 'pipe'] });
 }
 
-/** The pane's screen and scrollback as text. `trim` drops trailing blank rows. */
-export function capture(session, block, { trim = false } = {}) {
-  return rex(['capture', ...(trim ? ['--trim'] : []), ...target(session, block)]);
+/**
+ * The pane's screen and scrollback as text. `trim` drops trailing blank rows;
+ * `unwrap` rejoins lines the terminal wrapped, so a formula reads the same at
+ * any pane width.
+ */
+export function capture(session, block, { trim = false, unwrap = false } = {}) {
+  return rex(['capture', ...(trim ? ['--trim'] : []), ...(unwrap ? ['--unwrap'] : []), ...target(session, block)]);
 }
 
 export async function blockCall(session, block, method) {
