@@ -43,12 +43,14 @@ function joinLines(source, stripComments) {
 
 // `$...$` also appears in shell text and prices. Keep only what reads as math.
 export function looksLikeMath(tex) {
+  if (/["`]/.test(tex)) return false; // quoted shell text, as in "$A" -b "$B"
   if (/[\\^_={}<>+*/|]/.test(tex)) return true;
-  if (/^[A-Za-z](?:[-,][A-Za-z0-9])?$/.test(tex)) return true; // $x$, $n-1$
-  if (/^[A-Za-z0-9]{1,3}$/.test(tex) && /[A-Za-z]/.test(tex)) return true;
-  if (/^[A-Za-z]{1,3}'*\([^()]{1,20}\)$/.test(tex)) return true; // $f(x)$
-  if (/^[-\d\s.,A-Za-z()!']{1,40}$/.test(tex) && /\d/.test(tex) && /[A-Za-z(]/.test(tex) && !/\s[A-Za-z]{3,}/.test(tex)) return true; // $2n$
-  return false;
+  if (/^[\d.,]+%?$/.test(tex)) return true; // $0.1$, $95%$
+  // Anything else is symbols, digits and punctuation: $x$, $n-1$, $f(x)$,
+  // $[L, U]$, $(0, 1]$, $x, y$. Prose gives itself away by its words,
+  // so every run of letters has to be short, as in "$5 and $10".
+  const words = tex.match(/[A-Za-z]+/g) || [];
+  return tex.length <= 60 && (words.length > 0 || /\d/.test(tex)) && words.every((word) => word.length <= 2);
 }
 
 /**

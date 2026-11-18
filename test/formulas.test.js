@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { extractFormulas } from '../src/extract.js';
+import { extractFormulas, looksLikeMath } from '../src/extract.js';
 import { Graphics } from '../src/inline.js';
 import { locateFormulas } from '../src/locate.js';
 import { renderFormula, renderTile, typeset } from '../src/render.js';
@@ -126,4 +126,15 @@ test('an accented capital fits one row as inline math', () => {
       assert.ok(renderTile(typeset(tex, false), { ...box, cellH, exPx: cellH * 0.5 }), `${tex} at cell height ${cellH}`);
     }
   }
+});
+
+test('what counts as inline math', () => {
+  for (const tex of ['x', 'n-1', "f'(x)", '[L, U]', '(a, b]', '(0, 1)', 'x, y', '0.1', '95%', 'n!', 'A', 'a.b', String.raw`\hat{P}(s)`, 'L(s) = 1']) {
+    assert.ok(looksLikeMath(tex), tex);
+  }
+  for (const tex of ['5 and ', 'A" -b "', 'HOME and the', 'PATH', 'the price is', '(see below)']) {
+    assert.ok(!looksLikeMath(tex), tex);
+  }
+  const found = extractFormulas('The bound is $[L, U]$, not $5 and $10, and run "$HOME" -b "$PATH" now.').map((f) => f.tex);
+  assert.deepEqual(found, ['[L, U]']);
 });
