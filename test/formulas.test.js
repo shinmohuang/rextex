@@ -118,3 +118,12 @@ test('images follow the screen: moved when text moves, kept when it scrolls into
   out = graphics.update([at('a', 8)], false);
   assert.match(out, /a=p,i=\d+,p=3,/);
 });
+
+test('an accented capital fits one row as inline math', () => {
+  const box = { cols: 12, rows: 1, cellW: 8, density: 2, minScale: 0.52, inline: true, card: true, color: '#ffffff', background: '#000000' };
+  for (const cellH of [15, 16, 17, 20]) {
+    for (const tex of [String.raw`\hat{P}(s)`, String.raw`\tilde{O}(n^2)`, String.raw`\bar{X}_n`]) {
+      assert.ok(renderTile(typeset(tex, false), { ...box, cellH, exPx: cellH * 0.5 }), `${tex} at cell height ${cellH}`);
+    }
+  }
+});

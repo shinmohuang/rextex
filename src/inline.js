@@ -281,7 +281,9 @@ export async function runInline({ session, block, zoom = 1, density = 2, style =
           cellH,
           density,
           exPx,
-          minScale: 0.6,
+          // An accent over a capital, as in \hat{P}(s), is tall for one row.
+          // Let inline math shrink a little further before giving up on it.
+          minScale: formula.display ? 0.6 : 0.52,
           inline: !formula.display,
           card,
           color: theme.fg,

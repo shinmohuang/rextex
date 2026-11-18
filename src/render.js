@@ -117,7 +117,8 @@ export function renderTile(math, box) {
 
   // Space kept clear between the edge of the box and the formula.
   const padX = card ? (inline ? Math.max(3, cellW * 0.5) : cellW * 1.5) : inline ? 2 : 2 * cellW;
-  const padY = card ? (inline ? 1.5 : Math.max(4, cellH * 0.3)) : inline ? 1 : 3;
+  // One row is all an inline formula gets, so it keeps nearly all of it.
+  const padY = card ? (inline ? 0.75 : Math.max(4, cellH * 0.3)) : inline ? 0.75 : 3;
 
   const scale = Math.min(1, (boxW - 2 * padX) / naturalW, (boxH - 2 * padY) / naturalH);
   if (!(scale >= box.minScale)) return null;
