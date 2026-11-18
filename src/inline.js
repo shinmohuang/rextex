@@ -11,19 +11,14 @@ import { execFileSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import readline from 'node:readline';
+import { fileURLToPath } from 'node:url';
 
 import { locateFormulas } from './locate.js';
 import { renderTile, typeset } from './render.js';
-import { blockCall, capture, paneColors, REX } from './rex.js';
+import { blockCall, paneColors, REX } from './rex.js';
 
 const ESC = '\x1b';
-// The screen is polled. While it is changing, such as during scrolling, poll
-// as fast as the capture allows so the images keep up with the text; once it
-// has been still for a while, slow down to stay cheap.
-const ACTIVE_POLL_MS = 8;
-const IDLE_POLL_MS = 60;
-const ACTIVE_FOR_MS = 1500;
-const SIZE_EVERY_MS = 1000;
 const REPLACE_EVERY_MS = 2000;
 
 const stateDir = path.join(os.tmpdir(), `rextex-${os.userInfo().uid}`);
@@ -192,14 +187,15 @@ export async function runInline({ session, block, zoom = 1, density = 2, style =
     fs.rmSync(pidFile(block), { force: true });
     throw error;
   }
-  let theme = await currentTheme(session, block);
   const graphics = new Graphics();
   const tiles = new Map();
   let stopped = false;
 
+  let watcher = null;
   const finish = (code) => {
     if (stopped) return;
     stopped = true;
+    if (watcher) watcher.kill();
     try {
       const out = graphics.clear();
       if (out) fs.writeSync(fd, out);
@@ -215,106 +211,147 @@ export async function runInline({ session, block, zoom = 1, density = 2, style =
   };
   for (const signal of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(signal, () => finish(0));
 
-  let size = null;
-  let previous = null;
-  let failures = 0;
-  let sizeAt = 0;
-  let replacedAt = 0;
-  let changedAt = Date.now();
-  while (!stopped) {
-    try {
-      const now = Date.now();
-      // The size changes rarely; the text is what moves.
-      if (!size || now - sizeAt >= SIZE_EVERY_MS) {
-        size = await blockCall(session, block, 'size');
-        theme = await currentTheme(session, block);
-        sizeAt = now;
-      }
-      const text = await capture(session, block);
-      failures = 0;
-      const { columns, rows, cell_width_px: cellW, cell_height_px: cellH } = size;
-      const stamp = `${columns}x${rows}@${cellW}x${cellH}/${theme.fg}${theme.bg}${theme.themeBg}\n${text}`;
-      // Re-place everything now and then: a program that clears its screen
-      // also removes the images, and nothing reports that.
-      const force = now - replacedAt >= REPLACE_EVERY_MS;
-      if (force) replacedAt = now;
-      if (stamp !== previous) changedAt = now;
-      if (stamp !== previous || force) {
-        previous = stamp;
-        let lines = text.split('\n');
-        if (lines[lines.length - 1] === '') lines.pop();
-        if (lines.length > rows) lines = lines.slice(lines.length - rows); // the screen is the end of the scrollback
-        const placements = [];
-        for (const formula of locateFormulas(lines)) {
-          const exPx = cellH * 0.5 * zoom;
-          const card = style === 'card';
-          let col = formula.col;
-          let cols = formula.cols;
-          if (formula.display) {
-            // Wide enough to hide the source and to hold the formula, which
-            // may be the wider of the two.
-            const math = typeset(formula.tex, true);
-            const needed = math.error ? 0 : Math.ceil((math.widthEx * exPx) / cellW) + 4;
-            cols = Math.max(formula.cols, needed);
-            if (card) {
-              // A cell of margin each side, so the rounded corners fall on
-              // empty cells and not on the source's first and last characters.
-              if (col > 0) {
-                col -= 1;
-                cols += 1;
-              }
-              cols += 1;
-            }
-            cols = Math.min(columns - col, cols);
+  // Lay the formulas of one screen over their source.
+  const draw = ({ text, size, theme }, force) => {
+    const { columns, rows, cell_width_px: cellW, cell_height_px: cellH } = size;
+    let lines = text.split('\n');
+    if (lines[lines.length - 1] === '') lines.pop();
+    if (lines.length > rows) lines = lines.slice(lines.length - rows); // the screen is the end of the scrollback
+    const placements = [];
+    for (const formula of locateFormulas(lines)) {
+      const exPx = cellH * 0.5 * zoom;
+      const card = style === 'card';
+      let col = formula.col;
+      let cols = formula.cols;
+      if (formula.display) {
+        // Wide enough to hide the source and to hold the formula, which
+        // may be the wider of the two.
+        const math = typeset(formula.tex, true);
+        const needed = math.error ? 0 : Math.ceil((math.widthEx * exPx) / cellW) + 4;
+        cols = Math.max(formula.cols, needed);
+        if (card) {
+          // A cell of margin each side, so the rounded corners fall on
+          // empty cells and not on the source's first and last characters.
+          if (col > 0) {
+            col -= 1;
+            cols += 1;
           }
-          if (cols < 1 || col + cols > columns) continue;
-          // A card is tinted from the theme's own background. The plain style
-          // has to match what the terminal paints, which may be set by hand.
-          const background = card ? theme.themeBg || theme.bg : theme.bg;
-          const key = JSON.stringify([formula.tex, formula.display, cols, formula.rows, cellW, cellH, zoom, density, style, theme.fg, background]);
-          let png = tiles.get(key);
-          if (png === undefined) {
-            const box = {
-              cols,
-              rows: formula.rows,
-              cellW,
-              cellH,
-              density,
-              exPx,
-              minScale: 0.6,
-              inline: !formula.display,
-              card,
-              color: theme.fg,
-              background,
-            };
-            // Unfinished or invalid formulas stay readable as source.
-            const math = typeset(formula.tex, formula.display);
-            png = math.error ? null : renderTile(math, box);
-            if (!png && !math.error && formula.display && !/\\begin\{(equation|align|alignat|flalign|gather|multline|eqnarray)/.test(formula.tex)) {
-              // Too tall for the rows it has: set it the compact way TeX sets
-              // math inside a paragraph, with limits beside the operator.
-              const compact = typeset(formula.tex, false);
-              if (!compact.error) png = renderTile(compact, box);
-            }
-            if (tiles.size > 500) tiles.clear();
-            tiles.set(key, png);
-          }
-          if (png) placements.push({ key, png, row: formula.row, col, cols, rows: formula.rows });
+          cols += 1;
         }
-        const out = graphics.update(placements, force);
-        // One write, so the terminal gets it whole, between the program's own writes.
-        if (out) fs.writeSync(fd, out);
+        cols = Math.min(columns - col, cols);
       }
-    } catch (error) {
-      // The pane is gone, or Rex is restarting.
-      if (++failures >= 20) {
+      if (cols < 1 || col + cols > columns) continue;
+      // A card is tinted from the theme's own background. The plain style
+      // has to match what the terminal paints, which may be set by hand.
+      const background = card ? theme.themeBg || theme.bg : theme.bg;
+      const key = JSON.stringify([formula.tex, formula.display, cols, formula.rows, cellW, cellH, zoom, density, style, theme.fg, background]);
+      let png = tiles.get(key);
+      if (png === undefined) {
+        const box = {
+          cols,
+          rows: formula.rows,
+          cellW,
+          cellH,
+          density,
+          exPx,
+          minScale: 0.6,
+          inline: !formula.display,
+          card,
+          color: theme.fg,
+          background,
+        };
+        // Unfinished or invalid formulas stay readable as source.
+        const math = typeset(formula.tex, formula.display);
+        png = math.error ? null : renderTile(math, box);
+        if (!png && !math.error && formula.display && !/\\begin\{(equation|align|alignat|flalign|gather|multline|eqnarray)/.test(formula.tex)) {
+          // Too tall for the rows it has: set it the compact way TeX sets
+          // math inside a paragraph, with limits beside the operator.
+          const compact = typeset(formula.tex, false);
+          if (!compact.error) png = renderTile(compact, box);
+        }
+        if (tiles.size > 500) tiles.clear();
+        tiles.set(key, png);
+      }
+      if (png) placements.push({ key, png, row: formula.row, col, cols, rows: formula.rows });
+    }
+    const out = graphics.update(placements, force);
+    // One write, so the terminal gets it whole, between the program's own writes.
+    if (out) fs.writeSync(fd, out);
+  };
+
+  // The newest screen the watcher has reported. Reports can arrive faster
+  // than they are drawn; only the latest one matters.
+  let latest = null;
+  let pending = false;
+  const schedule = () => {
+    if (pending || stopped) return;
+    pending = true;
+    setImmediate(() => {
+      pending = false;
+      if (!latest || stopped) return;
+      try {
+        draw(latest, false);
+      } catch (error) {
+        // The pane's terminal is gone.
         process.stderr.write(`rextex inline ${block}: ${error.message}\n`);
         finish(1);
       }
+    });
+  };
+
+  // A program that clears its screen also removes the images, and nothing
+  // reports that, so put everything back in place now and then.
+  setInterval(() => {
+    if (!latest || stopped) return;
+    try {
+      draw(latest, true);
+    } catch {
+      finish(1);
     }
-    const active = Date.now() - changedAt < ACTIVE_FOR_MS;
-    await new Promise((resolve) => setTimeout(resolve, active ? ACTIVE_POLL_MS : IDLE_POLL_MS));
-  }
+  }, REPLACE_EVERY_MS);
+
+  const shades = () => savedShades();
+  let restarts = 0;
+  const watch = () => {
+    const args = ['do', '-b', block];
+    if (session) args.push('-s', session);
+    args.push(fileURLToPath(new URL('./watch.lua', import.meta.url)));
+    const child = spawn(REX, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    watcher = child;
+    let errors = '';
+    child.stderr.on('data', (chunk) => {
+      errors = (errors + chunk).slice(-400);
+    });
+    readline.createInterface({ input: child.stdout }).on('line', (line) => {
+      let report;
+      try {
+        report = JSON.parse(line);
+      } catch {
+        return;
+      }
+      if (typeof report.text !== 'string' || !report.size) return;
+      restarts = 0;
+      // A pane no app has shown yet has no theme; assume a dark one.
+      const live = report.fg && report.bg && !(report.bg === '#000000' && report.fg === '#ffffff')
+        ? { fg: report.fg, bg: report.bg }
+        : { fg: '#d0d0d0', bg: '#101010' };
+      const theme = { fg: live.fg, bg: shades()[schemeOf(live.bg)] || live.bg, themeBg: live.bg };
+      latest = { text: report.text, size: report.size, theme };
+      schedule();
+    });
+    child.on('exit', () => {
+      if (stopped) return;
+      // The pane has closed, or the server is restarting. Give it a few tries.
+      if (++restarts > 5) {
+        process.stderr.write(`rextex inline ${block}: the pane is gone${errors ? `: ${errors.trim().split('\n').pop()}` : ''}\n`);
+        finish(1);
+        return;
+      }
+      setTimeout(watch, 1000);
+    });
+  };
+  watch();
+  await new Promise(() => {}); // runs until a signal or the pane closing ends it
 }
 
 export { REX };
