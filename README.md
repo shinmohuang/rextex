@@ -80,7 +80,7 @@ Focus a pane that shows formulas and press `cmd+shift+m`, or search the command 
 
 - Inline math keeps to its one row. A display formula also uses the blank rows above and below it, so it can be drawn larger.
 - A formula that doesn't fit, such as a tall fraction on a single row, stays as source. So does one that is unfinished or has a syntax error.
-- The colors come from your terminal theme. The first time you use it, a small split flashes open to measure them. After you change the theme, run `rextex theme` in any pane to measure again. If a formula still shows a faint box around it, Rex is drawing its background in a different shade from the one it reports; set the shade by hand with `rextex theme --bg '#RRGGBB'`.
+- The colors follow the pane's theme, and change with it within about a second. If a formula shows a faint box around it, Rex is painting the pane in a surface color of its own instead of the theme's background. Measure that color from a screenshot and set it with `rextex theme --bg '#RRGGBB'`; it is kept separately for dark and for light themes. `rextex theme` shows the colors in use.
 
 ### List formulas in a second pane
 

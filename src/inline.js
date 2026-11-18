@@ -83,32 +83,41 @@ async function findTty(session, block) {
 // beneath them. The colors come from the server and are read again as the
 // renderer runs, so a theme change is followed.
 //
-// Rex may draw a pane's background in a slightly different shade from the
-// theme's. `rextex theme --bg` records the shade to use for one theme, and it
-// applies only while the pane still has the theme it was recorded for.
-function savedTheme() {
+// Rex may not paint a pane's background in the theme's background color: with
+// its default settings it uses a surface color of its own, one for dark themes
+// and one for light ones, whatever the theme. `rextex theme --bg` records that
+// color for the kind of theme the pane has, and it is used for the background
+// in place of the theme's.
+function savedShades() {
   try {
-    const theme = JSON.parse(fs.readFileSync(themeFile, 'utf8'));
-    if (/^#[0-9a-f]{6}$/i.test(theme.fg) && /^#[0-9a-f]{6}$/i.test(theme.bg)) return theme;
+    const saved = JSON.parse(fs.readFileSync(themeFile, 'utf8'));
+    const shades = {};
+    for (const scheme of ['dark', 'light']) {
+      if (/^#[0-9a-f]{6}$/i.test(saved[scheme] || '')) shades[scheme] = saved[scheme].toLowerCase();
+    }
+    return shades;
   } catch {
-    // Nothing saved.
+    return {};
   }
-  return null;
+}
+
+/** 'dark' or 'light', from how bright a background color is. */
+export function schemeOf(color) {
+  const [r, g, b] = [1, 3, 5].map((i) => parseInt(color.slice(i, i + 2), 16));
+  return 0.299 * r + 0.587 * g + 0.114 * b < 128 ? 'dark' : 'light';
 }
 
 export async function currentTheme(session, block) {
-  const saved = savedTheme();
+  const shades = savedShades();
   let live = null;
   try {
     live = await paneColors(session, block);
   } catch {
-    // Fall back to what was saved.
+    // Use the defaults below.
   }
-  if (!live) return saved || { fg: '#d0d0d0', bg: '#101010' };
-  if (saved && saved.reportedBg && saved.reportedBg.toLowerCase() === live.bg) {
-    return { fg: live.fg, bg: saved.bg };
-  }
-  return live;
+  // A pane no app has shown yet has no theme; assume a dark one.
+  if (!live) live = { fg: '#d0d0d0', bg: '#101010' };
+  return { fg: live.fg, bg: shades[schemeOf(live.bg)] || live.bg };
 }
 
 // What is on the pane's terminal: images uploaded once, placed where the

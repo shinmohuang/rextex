@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 
 import { extractFormulas } from '../src/extract.js';
-import { inlineRunning, runInline, startInline, stopInline, themeFile } from '../src/inline.js';
+import { currentTheme, inlineRunning, runInline, schemeOf, startInline, stopInline, themeFile } from '../src/inline.js';
 import { renderFormula } from '../src/render.js';
 import { blockCall, capture, paneColors } from '../src/rex.js';
 import { blockSource, fileSource } from '../src/sources.js';
@@ -20,7 +20,7 @@ Usage:
   rextex view FILE                                follow the formulas in a .tex or .md file
   rextex show 'LATEX'...                          draw formulas right here, in the scrollback
   rextex list [--block BLOCK | FILE]              print the formulas found, as text
-  rextex theme --bg '#RRGGBB'                     set the background shade to draw with, for the current theme
+  rextex theme [--bg '#RRGGBB' | --bg theme]      show the colors used in place, or set the background shade
 
 Options:
   -b, --block BLOCK      the Rex pane to read
@@ -53,7 +53,6 @@ try {
       on: { type: 'boolean' },
       off: { type: 'boolean' },
       foreground: { type: 'boolean' },
-      fg: { type: 'string' },
       bg: { type: 'string' },
       help: { type: 'boolean', short: 'h' },
     },
@@ -184,50 +183,39 @@ if (command === 'view') {
       process.stdout.write('on\n');
     }
   }
-} else if (command === 'theme' && (values.fg || values.bg)) {
-  // Set by hand, for a terminal that draws its background in a different
-  // shade from the one it reports.
-  const hex = /^#[0-9a-f]{6}$/i;
-  for (const name of ['fg', 'bg']) {
-    if (values[name] && !hex.test(values[name])) fail(`--${name} takes a color such as #1d1d21, not "${values[name]}"`);
-  }
-  let theme = {};
-  try {
-    theme = JSON.parse(fs.readFileSync(themeFile, 'utf8'));
-  } catch {
-    // Nothing measured yet.
-  }
-  theme = { fg: values.fg || theme.fg || '#d0d0d0', bg: values.bg || theme.bg || '#101010' };
-  // The shade belongs to the theme this pane has now.
-  const pane = values.block ?? process.env.REX_BLOCK;
-  if (pane) {
-    try {
-      const live = await paneColors(session, pane);
-      if (live) theme.reportedBg = live.bg;
-    } catch {
-      // Saved without a theme to tie it to.
-    }
-  }
-  fs.mkdirSync(path.dirname(themeFile), { recursive: true });
-  fs.writeFileSync(themeFile, JSON.stringify(theme) + '\n');
-  process.stdout.write(`foreground ${theme.fg}, background ${theme.bg}\n`);
 } else if (command === 'theme') {
-  if (!process.stdin.isTTY || !process.stdout.isTTY) fail('theme needs a terminal; run it in a Rex pane');
-  process.stdin.setRawMode(true);
-  process.stdin.resume();
-  // Rex answers color queries only once an app is showing the pane, so allow
-  // it a moment.
-  let term = {};
-  for (let attempt = 0; attempt < 8 && !(term.fg && term.bg); attempt++) {
-    term = { ...term, ...(await queryTerminal(process.stdin, process.stdout, 400)) };
-    if (!(term.fg && term.bg)) await new Promise((resolve) => setTimeout(resolve, 250));
+  // Show the colors rextex draws with in this pane, or record the background
+  // shade Rex really paints for this kind of theme (dark or light).
+  const pane = values.block ?? process.env.REX_BLOCK;
+  if (!pane) fail('theme needs a pane: run it in a Rex pane, or pass --block BLOCK');
+  let live;
+  try {
+    live = await paneColors(session, pane);
+  } catch (error) {
+    fail(error.message);
   }
-  process.stdin.setRawMode(false);
-  process.stdin.pause();
-  if (!term.fg || !term.bg) fail('this terminal did not report its colors');
-  fs.mkdirSync(path.dirname(themeFile), { recursive: true });
-  fs.writeFileSync(themeFile, JSON.stringify({ fg: term.fg, bg: term.bg }) + '\n');
-  process.stdout.write(`foreground ${term.fg}, background ${term.bg}\n`);
+  if (!live) fail("could not read that pane's theme: no app has shown the pane yet, or Rex's extended theme palette is off");
+  const scheme = schemeOf(live.bg);
+  if (values.bg) {
+    if (values.bg !== 'theme' && !/^#[0-9a-f]{6}$/i.test(values.bg)) {
+      fail(`--bg takes a color such as #1e1e20, or "theme" to go back to the theme's own, not "${values.bg}"`);
+    }
+    let saved = {};
+    try {
+      saved = JSON.parse(fs.readFileSync(themeFile, 'utf8'));
+    } catch {
+      // Nothing saved yet.
+    }
+    const next = {};
+    for (const name of ['dark', 'light']) if (typeof saved[name] === 'string') next[name] = saved[name];
+    if (values.bg === 'theme') delete next[scheme];
+    else next[scheme] = values.bg.toLowerCase();
+    fs.mkdirSync(path.dirname(themeFile), { recursive: true });
+    fs.writeFileSync(themeFile, JSON.stringify(next) + '\n');
+  }
+  const theme = await currentTheme(session, pane);
+  process.stdout.write(`${scheme} theme: foreground ${live.fg}, background ${live.bg}\n`);
+  process.stdout.write(`drawing with: foreground ${theme.fg}, background ${theme.bg}${theme.bg === live.bg ? '' : ` (set for ${scheme} themes)`}\n`);
 } else {
   fail(`unknown command "${command}"\nRun "rextex --help" for usage.`);
 }
