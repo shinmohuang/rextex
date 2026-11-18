@@ -1,0 +1,33 @@
+{
+  "name": "rextex",
+  "version": "0.1.0",
+  "description": "See LaTeX formulas as real math in a Rex pane",
+  "keywords": [
+    "rex",
+    "latex",
+    "math",
+    "terminal",
+    "kitty-graphics",
+    "mathjax"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/shinmohuang/rextex.git"
+  },
+  "type": "module",
+  "bin": {
+    "rextex": "bin/rextex.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "test": "node --test"
+  },
+  "dependencies": {
+    "@resvg/resvg-js": "^2.6.2",
+    "mathjax-full": "^3.2.1",
+    "string-width": "^9.0.0"
+  }
+}
