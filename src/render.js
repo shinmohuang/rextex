@@ -77,7 +77,38 @@ function paint(math, { canvasW, canvasH, x, y, width, height, color, background,
     .replace(/currentColor/g, color);
   const fill = background ? `<rect width="${canvasW}" height="${canvasH}" fill="${background}"/>` : '';
   const framed = `<svg xmlns="http://www.w3.org/2000/svg" width="${canvasW}" height="${canvasH}">${fill}${under}${inner}</svg>`;
-  return new Resvg(framed, { fitTo: { mode: 'original' }, font: { loadSystemFonts: false } }).render().asPng();
+  // MathJax draws its own glyphs as paths. Characters its fonts lack, such as
+  // Chinese inside \\text{...}, come out as text and need a font to draw them.
+  const font = /<text[\s>]/.test(inner) ? textFont() : { loadSystemFonts: false };
+  return new Resvg(framed, { fitTo: { mode: 'original' }, font }).render().asPng();
+}
+
+// Fonts that cover CJK and other scripts, broadest first. Loading one file
+// takes tens of milliseconds; scanning every system font takes over a second,
+// so that is the last resort.
+const TEXT_FONTS = [
+  '/System/Library/Fonts/Supplemental/Arial Unicode.ttf',
+  '/System/Library/Fonts/Hiragino Sans GB.ttc',
+  '/System/Library/Fonts/PingFang.ttc',
+  '/System/Library/Fonts/STHeiti Medium.ttc',
+  '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc',
+  '/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc',
+  '/usr/share/fonts/google-noto-cjk/NotoSansCJK-Regular.ttc',
+  '/usr/share/fonts/opentype/noto/NotoSerifCJK-Regular.ttc',
+  '/usr/share/fonts/truetype/wqy/wqy-microhei.ttc',
+  '/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf',
+  '/usr/share/fonts/truetype/arphic/uming.ttc',
+];
+
+let textFontOptions = null;
+
+function textFont() {
+  if (textFontOptions) return textFontOptions;
+  const fs = require('node:fs');
+  const extra = (process.env.REXTEX_FONT || '').split(':').filter(Boolean);
+  const found = [...extra, ...TEXT_FONTS].filter((file) => fs.existsSync(file)).slice(0, extra.length + 1);
+  textFontOptions = found.length > 0 ? { loadSystemFonts: false, fontFiles: found } : { loadSystemFonts: true };
+  return textFontOptions;
 }
 
 // A color part of the way from one to another.

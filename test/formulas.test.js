@@ -138,3 +138,13 @@ test('what counts as inline math', () => {
   const found = extractFormulas('The bound is $[L, U]$, not $5 and $10, and run "$HOME" -b "$PATH" now.').map((f) => f.tex);
   assert.deepEqual(found, ['[L, U]']);
 });
+
+test('text that MathJax has no glyphs for is still drawn', () => {
+  const options = { display: true, emPx: 20, color: '#000000', cellW: 8, cellH: 17, density: 1 };
+  const ink = (tex) => {
+    const { png } = renderFormula(tex, options);
+    return png.length;
+  };
+  // The same formula with and without the Chinese: the text adds ink.
+  assert.ok(ink(String.raw`x \ne 0 \quad \text{样本太少}`) > ink(String.raw`x \ne 0 \quad \text{\qquad\qquad\quad}`) + 200);
+});
