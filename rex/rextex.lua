@@ -25,6 +25,8 @@ local viewers = {}
 function M.setup(opts)
   opts = opts or {}
   local bin = opts.bin or ((os.getenv("HOME") or "") .. "/.local/bin/rextex")
+  local where = opts.where or "right"
+  local ratio = opts.ratio or 0.4
 
   -- This file runs on your home server, but a session may live on another
   -- host, and rextex has to run there: that is where the pane's terminal is.
