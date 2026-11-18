@@ -17,7 +17,14 @@ import { renderTile, typeset } from './render.js';
 import { blockCall, capture, REX, rexSync } from './rex.js';
 
 const ESC = '\x1b';
-const POLL_MS = 100;
+// The screen is polled. While it is changing, such as during scrolling, poll
+// as fast as the capture allows so the images keep up with the text; once it
+// has been still for a while, slow down to stay cheap.
+const ACTIVE_POLL_MS = 8;
+const IDLE_POLL_MS = 60;
+const ACTIVE_FOR_MS = 1500;
+const SIZE_EVERY_MS = 1000;
+const REPLACE_EVERY_MS = 2000;
 
 const stateDir = path.join(os.tmpdir(), `rextex-${os.userInfo().uid}`);
 const pidFile = (block) => path.join(stateDir, `${block.replace(/[^\w.-]/g, '_')}.pid`);
@@ -199,17 +206,26 @@ export async function runInline({ session, block, zoom = 1, density = 2, script 
   let size = null;
   let previous = null;
   let failures = 0;
-  for (let tick = 0; !stopped; tick++) {
+  let sizeAt = 0;
+  let replacedAt = 0;
+  let changedAt = Date.now();
+  while (!stopped) {
     try {
+      const now = Date.now();
       // The size changes rarely; the text is what moves.
-      if (!size || tick % 10 === 0) size = await blockCall(session, block, 'size');
+      if (!size || now - sizeAt >= SIZE_EVERY_MS) {
+        size = await blockCall(session, block, 'size');
+        sizeAt = now;
+      }
       const text = await capture(session, block);
       failures = 0;
       const { columns, rows, cell_width_px: cellW, cell_height_px: cellH } = size;
       const stamp = `${columns}x${rows}@${cellW}x${cellH}\n${text}`;
       // Re-place everything now and then: a program that clears its screen
       // also removes the images, and nothing reports that.
-      const force = tick % 20 === 0;
+      const force = now - replacedAt >= REPLACE_EVERY_MS;
+      if (force) replacedAt = now;
+      if (stamp !== previous) changedAt = now;
       if (stamp !== previous || force) {
         previous = stamp;
         let lines = text.split('\n');
@@ -268,7 +284,8 @@ export async function runInline({ session, block, zoom = 1, density = 2, script 
         finish(1);
       }
     }
-    await new Promise((resolve) => setTimeout(resolve, POLL_MS));
+    const active = Date.now() - changedAt < ACTIVE_FOR_MS;
+    await new Promise((resolve) => setTimeout(resolve, active ? ACTIVE_POLL_MS : IDLE_POLL_MS));
   }
 }
 
