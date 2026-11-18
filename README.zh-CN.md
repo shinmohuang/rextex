@@ -1,3 +1,5 @@
+<p align="center"><img src="assets/icon.svg" width="128" alt="rextex 图标"></p>
+
 # rextex
 
 在 [Rex](https://www.superlogical.com/rex/docs) 里把 LaTeX 公式显示成真正排版好的数学公式。

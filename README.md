@@ -1,3 +1,5 @@
+<p align="center"><img src="assets/icon.svg" width="128" alt="rextex icon"></p>
+
 # rextex
 
 See LaTeX formulas as real, typeset math in [Rex](https://www.superlogical.com/rex/docs) terminal panes.
