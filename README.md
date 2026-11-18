@@ -78,6 +78,7 @@ cd rextex
 
 Focus a pane that shows formulas and press `cmd+shift+m`, or search the command palette for "LaTeX: Render Formulas in Place". Each formula is drawn over its own source and follows the screen as it changes. Press the key again to see the source.
 
+- Each formula sits on a rounded card a shade apart from the background, sized to the formula. Set `inline_style = "plain"` to draw on the bare background instead.
 - Inline math keeps to its one row. A display formula also uses the blank rows above and below it, so it can be drawn larger.
 - A formula that doesn't fit, such as a tall fraction on a single row, stays as source. So does one that is unfinished or has a syntax error.
 - The colors follow the pane's theme, and change with it within about a second. If a formula shows a faint box around it, Rex is painting the pane in a surface color of its own instead of the theme's background. Measure that color from a screenshot and set it with `rextex theme --bg '#RRGGBB'`; it is kept separately for dark and for light themes. `rextex theme` shows the colors in use.
@@ -129,6 +130,7 @@ require("rextex").setup{ key = "cmd+shift+m" }
 | `key` | none | Key for in-place rendering. Without it, the action is in the command palette only. |
 | `preview_key` | none | Key for the formula pane. |
 | `inline_zoom` | `1` | Formula size for in-place rendering. |
+| `inline_style` | `"card"` | `"card"` sets each formula on a card; `"plain"` draws it on the bare background. |
 | `where` | `"right"` | Where the formula pane opens: `"right"`, `"below"`, or `"float"`. |
 | `ratio` | `0.4` | Share of the space the formula pane gets. |
 | `zoom` | `1.3` | Formula size in the formula pane, relative to the text. |

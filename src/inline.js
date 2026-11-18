@@ -179,7 +179,7 @@ class Graphics {
 }
 
 /** Run the renderer for one pane until the pane closes or we are told to stop. */
-export async function runInline({ session, block, zoom = 1, density = 2, script }) {
+export async function runInline({ session, block, zoom = 1, density = 2, style = 'card' }) {
   fs.mkdirSync(stateDir, { recursive: true });
   if (runningPid(block)) throw new Error('inline rendering is already on for that pane');
   fs.writeFileSync(pidFile(block), String(process.pid));
@@ -252,11 +252,11 @@ export async function runInline({ session, block, zoom = 1, density = 2, script 
             // Wide enough to hide the source and to hold the formula, which
             // may be the wider of the two.
             const math = typeset(formula.tex, true);
-            const needed = math.error ? 0 : Math.ceil((math.widthEx * exPx) / cellW) + 4;
+            const needed = math.error ? 0 : Math.ceil((math.widthEx * exPx) / cellW) + (style === 'card' ? 6 : 4);
             cols = Math.min(columns - formula.col, Math.max(formula.cols, needed));
           }
           if (cols < 1 || formula.col + cols > columns) continue;
-          const key = JSON.stringify([formula.tex, formula.display, cols, formula.rows, cellW, cellH, zoom, density, theme.fg, theme.bg]);
+          const key = JSON.stringify([formula.tex, formula.display, cols, formula.rows, cellW, cellH, zoom, density, style, theme.fg, theme.bg]);
           let png = tiles.get(key);
           if (png === undefined) {
             const box = {
@@ -267,8 +267,8 @@ export async function runInline({ session, block, zoom = 1, density = 2, script 
               density,
               exPx,
               minScale: 0.6,
-              align: 'left',
-              padLeft: formula.display ? 2 * cellW : 2,
+              inline: !formula.display,
+              card: style === 'card',
               color: theme.fg,
               background: theme.bg,
             };

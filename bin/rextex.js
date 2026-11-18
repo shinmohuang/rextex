@@ -27,6 +27,7 @@ Options:
   -s, --session SESSION  the session that pane is in (default: $REX_SESSION)
   -z, --zoom NUMBER      formula size relative to the text (default 1.3, inline 1)
       --on, --off        with inline: turn it on or off; with neither, switch
+      --style STYLE      with inline: "card" sets each formula on a card (default), "plain" on the bare background
       --density N        image pixels per terminal pixel, 1 to 4 (default 2)
       --inline           with show: typeset in inline style, not display style
   -h, --help             show this help
@@ -49,6 +50,7 @@ try {
       session: { type: 'string', short: 's' },
       zoom: { type: 'string', short: 'z' },
       density: { type: 'string' },
+      style: { type: 'string' },
       inline: { type: 'boolean' },
       on: { type: 'boolean' },
       off: { type: 'boolean' },
@@ -80,6 +82,8 @@ if (values.density !== undefined) {
   density = Number(values.density);
   if (!Number.isInteger(density) || density < 1 || density > 4) fail(`--density takes a whole number from 1 to 4, not "${values.density}"`);
 }
+const style = values.style ?? 'card';
+if (style !== 'card' && style !== 'plain') fail(`--style takes "card" or "plain", not "${values.style}"`);
 const session = values.session ?? process.env.REX_SESSION;
 
 function pickSource() {
@@ -157,7 +161,7 @@ if (command === 'view') {
   const script = fileURLToPath(import.meta.url);
   if (values.foreground) {
     try {
-      await runInline({ session, block, zoom, density, script });
+      await runInline({ session, block, zoom, density, style });
     } catch (error) {
       fail(error.message);
     }
@@ -177,7 +181,7 @@ if (command === 'view') {
         process.stderr.write(`rextex: that pane is not on this machine (${error.message})\n`);
         process.exit(3);
       }
-      const args = ['--block', block, '--zoom', String(zoom), '--density', String(density)];
+      const args = ['--block', block, '--zoom', String(zoom), '--density', String(density), '--style', style];
       if (session) args.push('--session', session);
       startInline(script, args);
       process.stdout.write('on\n');

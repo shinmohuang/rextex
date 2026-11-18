@@ -21,6 +21,7 @@ local viewers = {}
 ---   ratio  share of the space the viewer gets, for a split (default 0.4)
 ---   zoom   formula size relative to the text, in the formula pane (default 1.3)
 ---   inline_zoom  the same for in-place rendering (default 1)
+---   inline_style  "card" (default) sets each formula on a card, "plain" on the bare background
 function M.setup(opts)
   opts = opts or {}
   local bin = opts.bin or ((os.getenv("HOME") or "") .. "/.local/bin/rextex")
@@ -129,6 +130,10 @@ function M.setup(opts)
       if opts.inline_zoom then
         args[#args + 1] = "--zoom"
         args[#args + 1] = tostring(opts.inline_zoom)
+      end
+      if opts.inline_style then
+        args[#args + 1] = "--style"
+        args[#args + 1] = tostring(opts.inline_style)
       end
 
       -- Try this machine first. rextex answers with status 3 when the pane

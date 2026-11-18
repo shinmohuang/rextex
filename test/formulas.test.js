@@ -53,7 +53,7 @@ test('render produces a PNG sized in whole cells, and reports TeX errors', () =>
 
 test('a tile is refused when the formula would shrink too far', () => {
   const math = typeset(String.raw`\sum_{i=1}^{n} \frac{a_i}{b_i}`, true);
-  const box = { cols: 40, cellW: 8, cellH: 17, density: 2, exPx: 8.5, minScale: 0.6, align: 'left', color: '#fff', background: '#000' };
+  const box = { cols: 40, cellW: 8, cellH: 17, density: 2, exPx: 8.5, minScale: 0.6, inline: false, card: true, color: '#ffffff', background: '#000000' };
   assert.equal(renderTile(math, { ...box, rows: 1 }), null);
   assert.ok(renderTile(math, { ...box, rows: 4 }));
 });
