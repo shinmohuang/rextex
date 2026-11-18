@@ -14,7 +14,7 @@ import path from 'node:path';
 
 import { locateFormulas } from './locate.js';
 import { renderTile, typeset } from './render.js';
-import { blockCall, capture, REX, rexSync } from './rex.js';
+import { blockCall, capture, paneColors, REX } from './rex.js';
 
 const ESC = '\x1b';
 // The screen is polled. While it is changing, such as during scrolling, poll
@@ -79,33 +79,36 @@ async function findTty(session, block) {
   throw new Error('could not find the terminal device of that pane');
 }
 
-// Formulas are drawn opaque, in the terminal's own colors, so they hide the
-// source beneath them. A program outside the pane cannot ask that terminal
-// for its colors, so they are measured once in a pane of our own and kept.
-function loadTheme(session, block, script) {
-  const read = () => {
-    try {
-      const theme = JSON.parse(fs.readFileSync(themeFile, 'utf8'));
-      if (/^#[0-9a-f]{6}$/i.test(theme.fg) && /^#[0-9a-f]{6}$/i.test(theme.bg)) return theme;
-    } catch {
-      // Not measured yet.
-    }
-    return null;
-  };
-  let theme = read();
-  if (!theme) {
-    try {
-      // A split of the pane itself, because Rex only reports colors for a
-      // pane an app is showing. It closes as soon as it has the answer.
-      const args = ['split', '--split=below', '--ratio', '10', '--focus=false', '--wait', '--shell=none', '-b', block];
-      if (session) args.push('-s', session);
-      rexSync([...args, '--', process.execPath, script, 'theme']);
-    } catch {
-      // Fall through to the default.
-    }
-    theme = read();
+// Formulas are drawn opaque, in the pane's own colors, so they hide the source
+// beneath them. The colors come from the server and are read again as the
+// renderer runs, so a theme change is followed.
+//
+// Rex may draw a pane's background in a slightly different shade from the
+// theme's. `rextex theme --bg` records the shade to use for one theme, and it
+// applies only while the pane still has the theme it was recorded for.
+function savedTheme() {
+  try {
+    const theme = JSON.parse(fs.readFileSync(themeFile, 'utf8'));
+    if (/^#[0-9a-f]{6}$/i.test(theme.fg) && /^#[0-9a-f]{6}$/i.test(theme.bg)) return theme;
+  } catch {
+    // Nothing saved.
   }
-  return theme || { fg: '#d0d0d0', bg: '#101010' };
+  return null;
+}
+
+export async function currentTheme(session, block) {
+  const saved = savedTheme();
+  let live = null;
+  try {
+    live = await paneColors(session, block);
+  } catch {
+    // Fall back to what was saved.
+  }
+  if (!live) return saved || { fg: '#d0d0d0', bg: '#101010' };
+  if (saved && saved.reportedBg && saved.reportedBg.toLowerCase() === live.bg) {
+    return { fg: live.fg, bg: saved.bg };
+  }
+  return live;
 }
 
 // What is on the pane's terminal: images uploaded once, placed where the
@@ -180,7 +183,7 @@ export async function runInline({ session, block, zoom = 1, density = 2, script 
     fs.rmSync(pidFile(block), { force: true });
     throw error;
   }
-  const theme = loadTheme(session, block, script);
+  let theme = await currentTheme(session, block);
   const graphics = new Graphics();
   const tiles = new Map();
   let stopped = false;
@@ -215,12 +218,13 @@ export async function runInline({ session, block, zoom = 1, density = 2, script 
       // The size changes rarely; the text is what moves.
       if (!size || now - sizeAt >= SIZE_EVERY_MS) {
         size = await blockCall(session, block, 'size');
+        theme = await currentTheme(session, block);
         sizeAt = now;
       }
       const text = await capture(session, block);
       failures = 0;
       const { columns, rows, cell_width_px: cellW, cell_height_px: cellH } = size;
-      const stamp = `${columns}x${rows}@${cellW}x${cellH}\n${text}`;
+      const stamp = `${columns}x${rows}@${cellW}x${cellH}/${theme.fg}${theme.bg}\n${text}`;
       // Re-place everything now and then: a program that clears its screen
       // also removes the images, and nothing reports that.
       const force = now - replacedAt >= REPLACE_EVERY_MS;
@@ -243,7 +247,7 @@ export async function runInline({ session, block, zoom = 1, density = 2, script 
             cols = Math.min(columns - formula.col, Math.max(formula.cols, needed));
           }
           if (cols < 1 || formula.col + cols > columns) continue;
-          const key = JSON.stringify([formula.tex, formula.display, cols, formula.rows, cellW, cellH, zoom, density]);
+          const key = JSON.stringify([formula.tex, formula.display, cols, formula.rows, cellW, cellH, zoom, density, theme.fg, theme.bg]);
           let png = tiles.get(key);
           if (png === undefined) {
             const box = {

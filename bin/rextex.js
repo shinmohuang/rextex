@@ -7,7 +7,7 @@ import { parseArgs } from 'node:util';
 import { extractFormulas } from '../src/extract.js';
 import { inlineRunning, runInline, startInline, stopInline, themeFile } from '../src/inline.js';
 import { renderFormula } from '../src/render.js';
-import { blockCall, capture } from '../src/rex.js';
+import { blockCall, capture, paneColors } from '../src/rex.js';
 import { blockSource, fileSource } from '../src/sources.js';
 import { kittyImage, queryTerminal } from '../src/term.js';
 import { Viewer } from '../src/viewer.js';
@@ -20,8 +20,7 @@ Usage:
   rextex view FILE                                follow the formulas in a .tex or .md file
   rextex show 'LATEX'...                          draw formulas right here, in the scrollback
   rextex list [--block BLOCK | FILE]              print the formulas found, as text
-  rextex theme                                    measure this terminal's colors for inline mode
-  rextex theme --bg '#RRGGBB' [--fg '#RRGGBB']    set those colors by hand
+  rextex theme --bg '#RRGGBB'                     set the background shade to draw with, for the current theme
 
 Options:
   -b, --block BLOCK      the Rex pane to read
@@ -199,6 +198,16 @@ if (command === 'view') {
     // Nothing measured yet.
   }
   theme = { fg: values.fg || theme.fg || '#d0d0d0', bg: values.bg || theme.bg || '#101010' };
+  // The shade belongs to the theme this pane has now.
+  const pane = values.block ?? process.env.REX_BLOCK;
+  if (pane) {
+    try {
+      const live = await paneColors(session, pane);
+      if (live) theme.reportedBg = live.bg;
+    } catch {
+      // Saved without a theme to tie it to.
+    }
+  }
   fs.mkdirSync(path.dirname(themeFile), { recursive: true });
   fs.writeFileSync(themeFile, JSON.stringify(theme) + '\n');
   process.stdout.write(`foreground ${theme.fg}, background ${theme.bg}\n`);
