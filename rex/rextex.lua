@@ -42,22 +42,6 @@ function M.setup(opts)
     return argv
   end
 
-  -- Whether this server owns the session. Its own list has only its own.
-  local function is_local(session_id)
-    local result = rex.call("session.list")
-    if type(result) ~= "table" or type(result.sessions) ~= "table" then
-      return true
-    end
-    for _, session in ipairs(result.sessions) do
-      if session.session_id == session_id then
-        return true
-      end
-    end
-    return false
-  end
-  local where = opts.where or "right"
-  local ratio = opts.ratio or 0.4
-
   local function open(ctx)
     if not ctx.session_id or not ctx.block_id then
       error("rextex: no focused pane to read formulas from", 0)
@@ -147,34 +131,37 @@ function M.setup(opts)
         args[#args + 1] = tostring(opts.inline_zoom)
       end
 
-      if not is_local(ctx.session_id) then
-        -- The session is on another host. Start rextex there in a sliver of a
-        -- floating layer, which closes by itself once the renderer is running
-        -- in the background.
-        local _, err = rex.call("session.new_layer", {
-          session_id = ctx.session_id,
-          bounds = { 0.9, 0.94, 0.1, 0.06 },
-          focus = false,
-          layout = { block = { flavor = SHELL, label = "latex", options = { shell = "none", command = pane_command(args) } } },
-        })
-        if err ~= nil then
-          error("rextex: " .. tostring(err), 0)
-        end
-        return { inline = "switched" }
-      end
-
+      -- Try this machine first. rextex answers with status 3 when the pane
+      -- belongs to a session on another host.
       local argv = { bin }
       for _, arg in ipairs(args) do
         argv[#argv + 1] = arg
       end
-      local result, err = rex.exec(argv, { timeout = 15 })
-      if result == nil then
-        error("rextex is not installed on this machine (looked for " .. bin .. "): " .. tostring(err), 0)
+      local result = rex.exec(argv, { timeout = 15 })
+      if result ~= nil and result.ok then
+        return { inline = (result.stdout:gsub("%s+$", "")) }
       end
-      if not result.ok then
+      if result ~= nil and result.code ~= 3 then
         error((result.stderr ~= "" and result.stderr or "rextex inline failed"):gsub("%s+$", ""), 0)
       end
-      return { inline = (result.stdout:gsub("%s+$", "")) }
+
+      -- Not here, or rextex is not installed here: start it on the host that
+      -- owns the session, in a sliver of a floating layer that closes by
+      -- itself once the renderer is running in the background.
+      local _, err = rex.call("session.new_layer", {
+        session_id = ctx.session_id,
+        bounds = { 0.9, 0.94, 0.1, 0.06 },
+        focus = false,
+        layout = { block = { flavor = SHELL, label = "latex", options = { shell = "none", command = pane_command(args) } } },
+      })
+      if err ~= nil then
+        local message = tostring(err)
+        if message:find("no such file or directory", 1, true) then
+          error("rextex is not installed on the machine this session runs on. Run install.sh there.", 0)
+        end
+        error("rextex: " .. message, 0)
+      end
+      return { inline = "switched" }
     end,
   }
 

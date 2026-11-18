@@ -165,8 +165,14 @@ export async function runInline({ session, block, zoom = 1, density = 2, script 
   if (runningPid(block)) throw new Error('inline rendering is already on for that pane');
   fs.writeFileSync(pidFile(block), String(process.pid));
 
-  const tty = await findTty(session, block);
-  const fd = fs.openSync(tty, fs.constants.O_WRONLY | fs.constants.O_NOCTTY);
+  let fd;
+  try {
+    const tty = await findTty(session, block);
+    fd = fs.openSync(tty, fs.constants.O_WRONLY | fs.constants.O_NOCTTY);
+  } catch (error) {
+    fs.rmSync(pidFile(block), { force: true });
+    throw error;
+  }
   const theme = loadTheme(session, block, script);
   const graphics = new Graphics();
   const tiles = new Map();

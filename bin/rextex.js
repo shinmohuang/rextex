@@ -7,7 +7,7 @@ import { parseArgs } from 'node:util';
 import { extractFormulas } from '../src/extract.js';
 import { inlineRunning, runInline, startInline, stopInline, themeFile } from '../src/inline.js';
 import { renderFormula } from '../src/render.js';
-import { capture } from '../src/rex.js';
+import { blockCall, capture } from '../src/rex.js';
 import { blockSource, fileSource } from '../src/sources.js';
 import { kittyImage, queryTerminal } from '../src/term.js';
 import { Viewer } from '../src/viewer.js';
@@ -171,6 +171,14 @@ if (command === 'view') {
     } else if (running) {
       process.stdout.write('on\n');
     } else {
+      // The renderer must run on the machine that owns the pane. Say so with
+      // a status of its own, so a caller can start it there.
+      try {
+        await blockCall(session, block, 'size');
+      } catch (error) {
+        process.stderr.write(`rextex: that pane is not on this machine (${error.message})\n`);
+        process.exit(3);
+      }
       const args = ['--block', block, '--zoom', String(zoom), '--density', String(density)];
       if (session) args.push('--session', session);
       startInline(script, args);
