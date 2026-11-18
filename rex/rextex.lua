@@ -24,6 +24,37 @@ local viewers = {}
 function M.setup(opts)
   opts = opts or {}
   local bin = opts.bin or ((os.getenv("HOME") or "") .. "/.local/bin/rextex")
+
+  -- This file runs on your home server, but a session may live on another
+  -- host, and rextex has to run there: that is where the pane's terminal is.
+  -- A command for a pane is started by the host that owns the session, so it
+  -- is written to find rextex in that host's own home directory.
+  local function pane_command(args)
+    local argv
+    if opts.bin then
+      argv = { opts.bin }
+    else
+      argv = { "/bin/sh", "-c", 'exec "$HOME/.local/bin/rextex" "$@"', "rextex" }
+    end
+    for _, arg in ipairs(args) do
+      argv[#argv + 1] = arg
+    end
+    return argv
+  end
+
+  -- Whether this server owns the session. Its own list has only its own.
+  local function is_local(session_id)
+    local result = rex.call("session.list")
+    if type(result) ~= "table" or type(result.sessions) ~= "table" then
+      return true
+    end
+    for _, session in ipairs(result.sessions) do
+      if session.session_id == session_id then
+        return true
+      end
+    end
+    return false
+  end
   local where = opts.where or "right"
   local ratio = opts.ratio or 0.4
 
@@ -50,11 +81,12 @@ function M.setup(opts)
       end
     end
 
-    local command = { bin, "view", "--session", ctx.session_id, "--block", ctx.block_id }
+    local args = { "view", "--session", ctx.session_id, "--block", ctx.block_id }
     if opts.zoom then
-      command[#command + 1] = "--zoom"
-      command[#command + 1] = tostring(opts.zoom)
+      args[#args + 1] = "--zoom"
+      args[#args + 1] = tostring(opts.zoom)
     end
+    local command = pane_command(args)
     local layout = { block = { flavor = SHELL, label = "latex", options = { shell = "none", command = command } } }
 
     local result, err
@@ -81,7 +113,7 @@ function M.setup(opts)
       if message:find("no such file or directory", 1, true) then
         -- The pane is created on the machine that runs the session, which may be
         -- another host than the one this config was written for.
-        error("rextex is not installed on the machine this session runs on (looked for " .. bin .. "). Run install.sh there.", 0)
+        error("rextex is not installed on the machine this session runs on. Run install.sh there.", 0)
       end
       error("rextex: " .. message, 0)
     end
@@ -109,10 +141,31 @@ function M.setup(opts)
       if not ctx.session_id or not ctx.block_id then
         error("rextex: no focused pane to render formulas in", 0)
       end
-      local argv = { bin, "inline", "--session", ctx.session_id, "--block", ctx.block_id }
+      local args = { "inline", "--session", ctx.session_id, "--block", ctx.block_id }
       if opts.inline_zoom then
-        argv[#argv + 1] = "--zoom"
-        argv[#argv + 1] = tostring(opts.inline_zoom)
+        args[#args + 1] = "--zoom"
+        args[#args + 1] = tostring(opts.inline_zoom)
+      end
+
+      if not is_local(ctx.session_id) then
+        -- The session is on another host. Start rextex there in a sliver of a
+        -- floating layer, which closes by itself once the renderer is running
+        -- in the background.
+        local _, err = rex.call("session.new_layer", {
+          session_id = ctx.session_id,
+          bounds = { 0.9, 0.94, 0.1, 0.06 },
+          focus = false,
+          layout = { block = { flavor = SHELL, label = "latex", options = { shell = "none", command = pane_command(args) } } },
+        })
+        if err ~= nil then
+          error("rextex: " .. tostring(err), 0)
+        end
+        return { inline = "switched" }
+      end
+
+      local argv = { bin }
+      for _, arg in ipairs(args) do
+        argv[#argv + 1] = arg
       end
       local result, err = rex.exec(argv, { timeout = 15 })
       if result == nil then
