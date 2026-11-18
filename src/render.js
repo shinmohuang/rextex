@@ -92,14 +92,17 @@ function mix(from, to, amount) {
 }
 
 /**
- * Draw a formula onto an opaque tile that exactly covers a box of terminal
- * cells, scaled down if it has to be to fit. Returns null when it would have
- * to shrink below `minScale` of its natural size.
+ * Draw a formula onto a tile that exactly covers a box of terminal cells,
+ * scaled down if it has to be to fit. Returns null when it would have to
+ * shrink below `minScale` of its natural size.
  *
- * With `card`, the formula sits on a rounded card a shade apart from the
- * background, as a code block does in an editor. The card is sized to the
- * formula, not to the box: the box is as wide as the LaTeX source it hides,
- * which says nothing about how wide the formula is.
+ * With `card`, the tile is a rounded card a shade apart from the background,
+ * as a code block is in an editor, with the formula centered on it. The card
+ * fills the whole box and nothing is painted outside it, so the tile never
+ * has to match the color the terminal paints its background with.
+ *
+ * Without it, the tile is filled with `background` and the formula sits at
+ * its left edge.
  *
  * @param {{ svg: string, widthEx: number, heightEx: number }} math
  * @param {{ cols: number, rows: number, cellW: number, cellH: number, density: number, exPx: number,
@@ -112,39 +115,34 @@ export function renderTile(math, box) {
   const naturalW = math.widthEx * box.exPx;
   const naturalH = math.heightEx * box.exPx;
 
-  // Space between the box and the card, and between the card and the formula.
-  const outerX = inline ? (card ? 1 : 2) : card ? cellW : 2 * cellW;
-  const outerY = inline ? (card ? 0.5 : 1) : card ? 2 : 3;
-  const innerX = card ? (inline ? Math.max(3, cellW * 0.5) : cellW * 1.25) : 0;
-  const innerY = card ? (inline ? 1 : Math.max(4, cellH * 0.3)) : 0;
+  // Space kept clear between the edge of the box and the formula.
+  const padX = card ? (inline ? Math.max(3, cellW * 0.5) : cellW * 1.5) : inline ? 2 : 2 * cellW;
+  const padY = card ? (inline ? 1.5 : Math.max(4, cellH * 0.3)) : inline ? 1 : 3;
 
-  const scale = Math.min(1, (boxW - 2 * outerX - 2 * innerX) / naturalW, (boxH - 2 * outerY - 2 * innerY) / naturalH);
+  const scale = Math.min(1, (boxW - 2 * padX) / naturalW, (boxH - 2 * padY) / naturalH);
   if (!(scale >= box.minScale)) return null;
   const width = naturalW * scale;
   const height = naturalH * scale;
 
   let under = '';
   if (card) {
-    const cardW = width + 2 * innerX;
-    // An inline card fills its row, so cards on one line share a height.
-    const cardH = inline ? boxH - 2 * outerY : height + 2 * innerY;
-    const cardY = (boxH - cardH) / 2;
-    const radius = Math.min(inline ? 4 : 7, cardH / 2);
+    const inset = 0.5;
+    const radius = Math.min(inline ? 4 : 7, boxH / 2);
     const px = (value) => (value * density).toFixed(2);
     under =
-      `<rect x="${px(outerX)}" y="${px(cardY)}" width="${px(cardW)}" height="${px(cardH)}" rx="${px(radius)}"` +
-      ` fill="${mix(box.background, box.color, 0.07)}" stroke="${mix(box.background, box.color, 0.16)}" stroke-width="${density}"/>`;
+      `<rect x="${px(inset)}" y="${px(inset)}" width="${px(boxW - 2 * inset)}" height="${px(boxH - 2 * inset)}" rx="${px(radius)}"` +
+      ` fill="${mix(box.background, box.color, 0.1)}" stroke="${mix(box.background, box.color, 0.2)}" stroke-width="${density}"/>`;
   }
   try {
     return paint(math, {
       canvasW: boxW * density,
       canvasH: boxH * density,
-      x: (outerX + innerX) * density,
+      x: (card ? (boxW - width) / 2 : padX) * density,
       y: ((boxH - height) / 2) * density,
       width: width * density,
       height: height * density,
       color: box.color,
-      background: box.background,
+      background: card ? null : box.background,
       under,
     });
   } catch {

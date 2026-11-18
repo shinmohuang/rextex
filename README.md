@@ -78,10 +78,10 @@ cd rextex
 
 Focus a pane that shows formulas and press `cmd+shift+m`, or search the command palette for "LaTeX: Render Formulas in Place". Each formula is drawn over its own source and follows the screen as it changes. Press the key again to see the source.
 
-- Each formula sits on a rounded card a shade apart from the background, sized to the formula. Set `inline_style = "plain"` to draw on the bare background instead.
+- Each formula sits centered on a rounded card a shade apart from the background. The card covers the cells of the source and nothing else is painted, so it looks the same whatever color Rex paints the pane. Set `inline_style = "plain"` to draw on the bare background instead.
 - Inline math keeps to its one row. A display formula also uses the blank rows above and below it, so it can be drawn larger.
 - A formula that doesn't fit, such as a tall fraction on a single row, stays as source. So does one that is unfinished or has a syntax error.
-- The colors follow the pane's theme, and change with it within about a second. If a formula shows a faint box around it, Rex is painting the pane in a surface color of its own instead of the theme's background. Measure that color from a screenshot and set it with `rextex theme --bg '#RRGGBB'`; it is kept separately for dark and for light themes. `rextex theme` shows the colors in use.
+- The colors follow the pane's theme, and change with it within about a second. `rextex theme` shows the colors in use. The plain style has to match the color Rex really paints the pane, which with some settings is a surface color of its own, not the theme's background; if a plain formula shows a box around it, measure that color from a screenshot and set it with `rextex theme --bg '#RRGGBB'`.
 
 ### List formulas in a second pane
 

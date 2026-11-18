@@ -117,7 +117,7 @@ export async function currentTheme(session, block) {
   }
   // A pane no app has shown yet has no theme; assume a dark one.
   if (!live) live = { fg: '#d0d0d0', bg: '#101010' };
-  return { fg: live.fg, bg: shades[schemeOf(live.bg)] || live.bg };
+  return { fg: live.fg, bg: shades[schemeOf(live.bg)] || live.bg, themeBg: live.bg };
 }
 
 // What is on the pane's terminal: images uploaded once, placed where the
@@ -233,7 +233,7 @@ export async function runInline({ session, block, zoom = 1, density = 2, style =
       const text = await capture(session, block);
       failures = 0;
       const { columns, rows, cell_width_px: cellW, cell_height_px: cellH } = size;
-      const stamp = `${columns}x${rows}@${cellW}x${cellH}/${theme.fg}${theme.bg}\n${text}`;
+      const stamp = `${columns}x${rows}@${cellW}x${cellH}/${theme.fg}${theme.bg}${theme.themeBg}\n${text}`;
       // Re-place everything now and then: a program that clears its screen
       // also removes the images, and nothing reports that.
       const force = now - replacedAt >= REPLACE_EVERY_MS;
@@ -247,16 +247,31 @@ export async function runInline({ session, block, zoom = 1, density = 2, style =
         const placements = [];
         for (const formula of locateFormulas(lines)) {
           const exPx = cellH * 0.5 * zoom;
+          const card = style === 'card';
+          let col = formula.col;
           let cols = formula.cols;
           if (formula.display) {
             // Wide enough to hide the source and to hold the formula, which
             // may be the wider of the two.
             const math = typeset(formula.tex, true);
-            const needed = math.error ? 0 : Math.ceil((math.widthEx * exPx) / cellW) + (style === 'card' ? 6 : 4);
-            cols = Math.min(columns - formula.col, Math.max(formula.cols, needed));
+            const needed = math.error ? 0 : Math.ceil((math.widthEx * exPx) / cellW) + 4;
+            cols = Math.max(formula.cols, needed);
+            if (card) {
+              // A cell of margin each side, so the rounded corners fall on
+              // empty cells and not on the source's first and last characters.
+              if (col > 0) {
+                col -= 1;
+                cols += 1;
+              }
+              cols += 1;
+            }
+            cols = Math.min(columns - col, cols);
           }
-          if (cols < 1 || formula.col + cols > columns) continue;
-          const key = JSON.stringify([formula.tex, formula.display, cols, formula.rows, cellW, cellH, zoom, density, style, theme.fg, theme.bg]);
+          if (cols < 1 || col + cols > columns) continue;
+          // A card is tinted from the theme's own background. The plain style
+          // has to match what the terminal paints, which may be set by hand.
+          const background = card ? theme.themeBg || theme.bg : theme.bg;
+          const key = JSON.stringify([formula.tex, formula.display, cols, formula.rows, cellW, cellH, zoom, density, style, theme.fg, background]);
           let png = tiles.get(key);
           if (png === undefined) {
             const box = {
@@ -268,9 +283,9 @@ export async function runInline({ session, block, zoom = 1, density = 2, style =
               exPx,
               minScale: 0.6,
               inline: !formula.display,
-              card: style === 'card',
+              card,
               color: theme.fg,
-              background: theme.bg,
+              background,
             };
             // Unfinished or invalid formulas stay readable as source.
             const math = typeset(formula.tex, formula.display);
@@ -284,7 +299,7 @@ export async function runInline({ session, block, zoom = 1, density = 2, style =
             if (tiles.size > 500) tiles.clear();
             tiles.set(key, png);
           }
-          if (png) placements.push({ key, png, row: formula.row, col: formula.col, cols, rows: formula.rows });
+          if (png) placements.push({ key, png, row: formula.row, col, cols, rows: formula.rows });
         }
         const out = graphics.update(placements, force);
         // One write, so the terminal gets it whole, between the program's own writes.
