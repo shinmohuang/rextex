@@ -22,6 +22,7 @@ local viewers = {}
 ---   zoom   formula size relative to the text, in the formula pane (default 1.3)
 ---   inline_zoom  the same for in-place rendering (default 1)
 ---   inline_style  "card" (default) sets each formula on a card, "plain" on the bare background
+---   restore  false to leave in-place rendering off after the server restarts (default true)
 function M.setup(opts)
   opts = opts or {}
   local bin = opts.bin or ((os.getenv("HOME") or "") .. "/.local/bin/rextex")
@@ -171,6 +172,13 @@ function M.setup(opts)
       return { inline = "switched" }
     end,
   }
+
+  -- This file runs when the server starts, as after a reboot. Turn in-place
+  -- rendering back on in the panes that had it. rextex waits for the server
+  -- to be ready and does nothing if no pane had it on.
+  if opts.restore ~= false and rex.exec and rex.exec.start then
+    rex.exec.start({ bin, "restore" }, { detach = true, stdout = false, stderr = false })
+  end
 
   if opts.key then
     rex.bind(opts.key, "latex_inline")

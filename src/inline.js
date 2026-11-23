@@ -21,42 +21,170 @@ import { blockCall, paneColors, REX } from './rex.js';
 const ESC = '\x1b';
 const REPLACE_EVERY_MS = 2000;
 
-const stateDir = path.join(os.tmpdir(), `rextex-${os.userInfo().uid}`);
-const pidFile = (block) => path.join(stateDir, `${block.replace(/[^\w.-]/g, '_')}.pid`);
+// State lives under the home directory, so it outlasts a reboot. Machines in
+// a cluster may share one home directory, so on Linux each keeps its own,
+// under its host name. A Mac's host name changes with the network it is on.
+const stateHome = process.env.XDG_STATE_HOME || path.join(os.homedir(), '.local', 'state');
+export const stateDir = path.join(stateHome, 'rextex', process.platform === 'darwin' ? '' : os.hostname().split('.')[0]);
+const panesDir = path.join(stateDir, 'panes');
+const fileName = (block) => block.replace(/[^\w.-]/g, '_');
+const pidFile = (block) => path.join(stateDir, `${fileName(block)}.pid`);
+const paneFile = (block) => path.join(panesDir, `${fileName(block)}.json`);
+export const logFile = path.join(stateDir, 'inline.log');
 export const themeFile = path.join(process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config'), 'rextex', 'theme.json');
 
-function runningPid(block) {
+function log(message) {
   try {
-    const pid = Number(fs.readFileSync(pidFile(block), 'utf8'));
+    fs.mkdirSync(stateDir, { recursive: true });
+    fs.appendFileSync(logFile, `${new Date().toISOString()} ${message}\n`);
+  } catch {
+    // Nowhere to write it.
+  }
+}
+
+// The command line of a process, or '' if there is no such process.
+function commandOf(pid) {
+  try {
+    return fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').replace(/\0/g, ' ');
+  } catch {
+    // No /proc (macOS), or no such process.
+  }
+  try {
+    return execFileSync('ps', ['-o', 'command=', '-p', String(pid)], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+  } catch {
+    return '';
+  }
+}
+
+// A pid file outlasts a reboot, after which its number may belong to another
+// process. Trust it only while it names a renderer for this pane.
+function runningPid(file, mark) {
+  try {
+    const pid = Number(fs.readFileSync(file, 'utf8'));
     if (!Number.isInteger(pid) || pid <= 1) return null;
-    process.kill(pid, 0);
-    return pid;
+    const command = commandOf(pid);
+    return command.includes('rextex') && command.includes(mark) ? pid : null;
   } catch {
     return null;
   }
 }
 
-/** Stop the renderer for a pane. Returns whether one was running. */
+/** Stop the renderer for a pane, and don't bring it back after a restart. Returns whether one was running. */
 export function stopInline(block) {
-  const pid = runningPid(block);
+  fs.rmSync(paneFile(block), { force: true });
+  const pid = runningPid(pidFile(block), block);
   if (!pid) return false;
   process.kill(pid, 'SIGTERM');
   return true;
 }
 
 export function inlineRunning(block) {
-  return runningPid(block) !== null;
+  return runningPid(pidFile(block), block) !== null;
+}
+
+function inlineArgs({ session, block, zoom = 1, density = 2, style = 'card' }) {
+  const args = ['--block', block, '--zoom', String(zoom), '--density', String(density), '--style', style];
+  if (session) args.push('--session', session);
+  return args;
 }
 
 /** Start the renderer for a pane as a background process. */
-export function startInline(script, args) {
+export function startInline(script, options) {
   fs.mkdirSync(stateDir, { recursive: true });
-  const log = fs.openSync(path.join(stateDir, 'inline.log'), 'a');
-  const child = spawn(process.execPath, [script, 'inline', '--foreground', ...args], {
+  const out = fs.openSync(logFile, 'a');
+  const child = spawn(process.execPath, [script, 'inline', '--foreground', ...inlineArgs(options)], {
     detached: true,
-    stdio: ['ignore', log, log],
+    stdio: ['ignore', out, out],
   });
   child.unref();
+}
+
+// Panes with rendering on are recorded, so it can be turned back on when the
+// server starts again, as after a reboot. A record goes when rendering is
+// turned off or the pane closes.
+function rememberPane({ session, block, zoom, density, style }) {
+  fs.mkdirSync(panesDir, { recursive: true });
+  fs.writeFileSync(paneFile(block), JSON.stringify({ session, block, zoom, density, style }) + '\n');
+}
+
+function forgetPane(block) {
+  fs.rmSync(paneFile(block), { force: true });
+}
+
+function rememberedPanes() {
+  let names = [];
+  try {
+    names = fs.readdirSync(panesDir).filter((name) => name.endsWith('.json'));
+  } catch {
+    return [];
+  }
+  const panes = [];
+  for (const name of names) {
+    try {
+      const pane = JSON.parse(fs.readFileSync(path.join(panesDir, name), 'utf8'));
+      if (typeof pane.block === 'string') panes.push(pane);
+    } catch {
+      fs.rmSync(path.join(panesDir, name), { force: true });
+    }
+  }
+  return panes;
+}
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const notFound = (error) => /not found/i.test(String(error && error.message));
+
+/**
+ * Turn rendering back on in the panes that had it, as the server comes up.
+ * The server may not answer yet, and a pane's program may not have started,
+ * so keep trying for a while. A pane the server says it doesn't have, once it
+ * has had time to restore its sessions, is forgotten.
+ */
+export async function restoreInline(script, { waitMs = 180000, graceMs = 60000 } = {}) {
+  let panes = rememberedPanes();
+  if (panes.length === 0) return;
+  // One restore at a time: a config reload starts another.
+  const lock = path.join(stateDir, 'restore.pid');
+  if (runningPid(lock, 'restore')) return;
+  fs.writeFileSync(lock, String(process.pid));
+  try {
+    const start = Date.now();
+    let answered = null;
+    while (panes.length > 0 && Date.now() - start < waitMs) {
+      const waiting = [];
+      for (const pane of panes) {
+        if (inlineRunning(pane.block)) continue;
+        try {
+          await findTty(pane.session, pane.block);
+          answered ??= Date.now();
+          startInline(script, pane);
+          log(`restored rendering in ${pane.block}`);
+        } catch (error) {
+          if (notFound(error)) {
+            answered ??= Date.now();
+            if (Date.now() - answered >= graceMs) {
+              forgetPane(pane.block);
+              log(`forgot ${pane.block}: ${error.message}`);
+              continue;
+            }
+          } else if (!/terminal device/.test(error.message)) {
+            // The server isn't answering yet.
+          } else {
+            answered ??= Date.now();
+          }
+          waiting.push(pane);
+        }
+      }
+      panes = waiting;
+      if (panes.length > 0) await sleep(3000);
+    }
+    for (const pane of panes) log(`could not restore rendering in ${pane.block}`);
+  } finally {
+    try {
+      if (Number(fs.readFileSync(lock, 'utf8')) === process.pid) fs.unlinkSync(lock);
+    } catch {
+      // Already gone.
+    }
+  }
 }
 
 // The tty of the pane, found through the processes that run in it.
@@ -201,7 +329,7 @@ export class Graphics {
 /** Run the renderer for one pane until the pane closes or we are told to stop. */
 export async function runInline({ session, block, zoom = 1, density = 2, style = 'card' }) {
   fs.mkdirSync(stateDir, { recursive: true });
-  if (runningPid(block)) throw new Error('inline rendering is already on for that pane');
+  if (inlineRunning(block)) throw new Error('inline rendering is already on for that pane');
   fs.writeFileSync(pidFile(block), String(process.pid));
 
   let fd;
@@ -210,8 +338,10 @@ export async function runInline({ session, block, zoom = 1, density = 2, style =
     fd = fs.openSync(tty, fs.constants.O_WRONLY | fs.constants.O_NOCTTY);
   } catch (error) {
     fs.rmSync(pidFile(block), { force: true });
+    if (notFound(error)) forgetPane(block);
     throw error;
   }
+  rememberPane({ session, block, zoom, density, style });
   const graphics = new Graphics();
   const tiles = new Map();
   let stopped = false;
@@ -380,7 +510,16 @@ export async function runInline({ session, block, zoom = 1, density = 2, style =
       if (stopped) return;
       // The pane has closed, or the server is restarting. Give it a few tries.
       if (++restarts > 5) {
-        process.stderr.write(`rextex inline ${block}: the pane is gone${errors ? `: ${errors.trim().split('\n').pop()}` : ''}\n`);
+        const reason = errors.trim().split('\n').pop() || '';
+        if (/not found/i.test(reason)) {
+          // The pane has closed: don't bring rendering back for it.
+          forgetPane(block);
+          process.stderr.write(`rextex inline ${block}: the pane is gone: ${reason}\n`);
+        } else {
+          // The server went away. When it starts again, it turns rendering
+          // back on from the record.
+          process.stderr.write(`rextex inline ${block}: lost the server${reason ? `: ${reason}` : ''}\n`);
+        }
         finish(1);
         return;
       }

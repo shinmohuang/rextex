@@ -5,7 +5,16 @@ import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 
 import { extractFormulas } from '../src/extract.js';
-import { currentTheme, inlineRunning, runInline, schemeOf, startInline, stopInline, themeFile } from '../src/inline.js';
+import {
+  currentTheme,
+  inlineRunning,
+  restoreInline,
+  runInline,
+  schemeOf,
+  startInline,
+  stopInline,
+  themeFile,
+} from '../src/inline.js';
 import { renderFormula } from '../src/render.js';
 import { blockCall, capture, paneColors } from '../src/rex.js';
 import { blockSource, fileSource } from '../src/sources.js';
@@ -16,6 +25,7 @@ const HELP = `rextex: see LaTeX formulas as real math in a Rex pane.
 
 Usage:
   rextex inline --block BLOCK [--on|--off]        draw formulas over their source, in the pane itself
+  rextex restore                                  turn in-place rendering back on where it was, as after a reboot
   rextex view --block BLOCK [--session SESSION]   follow the formulas shown in a pane, in this one
   rextex view FILE                                follow the formulas in a .tex or .md file
   rextex show 'LATEX'...                          draw formulas right here, in the scrollback
@@ -181,12 +191,13 @@ if (command === 'view') {
         process.stderr.write(`rextex: that pane is not on this machine (${error.message})\n`);
         process.exit(3);
       }
-      const args = ['--block', block, '--zoom', String(zoom), '--density', String(density), '--style', style];
-      if (session) args.push('--session', session);
-      startInline(script, args);
+      startInline(script, { session, block, zoom, density, style });
       process.stdout.write('on\n');
     }
   }
+} else if (command === 'restore') {
+  // Rex runs this when its server starts (see rex/rextex.lua).
+  await restoreInline(fileURLToPath(import.meta.url));
 } else if (command === 'theme') {
   // Show the colors rextex draws with in this pane, or record the background
   // shade Rex really paints for this kind of theme (dark or light).

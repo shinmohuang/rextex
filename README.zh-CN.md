@@ -78,6 +78,8 @@ cd rextex
 
 聚焦到有公式的面板，按 `cmd+shift+m`，或在命令面板里搜 “LaTeX: Render Formulas in Place”。公式会直接画在它自己的源码上面，随屏幕内容实时更新；再按一次恢复显示源码。
 
+Rex 重启后渲染会自动恢复：服务端再次启动时（比如机器重启后），rextex 会在原来开着渲染的面板里重新打开它，等面板里的程序跑起来就生效。手动关掉渲染或关闭面板后，就不再恢复。
+
 - 每条公式居中画在一张圆角卡片上，卡片颜色和背景略有区分。卡片正好盖住源码占的格子，卡片之外不画任何东西，所以无论 Rex 把面板画成什么底色，看起来都一样。想直接画在背景上，设 `inline_style = "plain"`。
 - 行内公式只占原来那一行；独占一行的公式会借用上下的空行，所以能画得大一些。
 - 放不下的公式（比如一行里的大分式）、没写完或有语法错误的公式保持源码不动。
@@ -105,6 +107,7 @@ cd rextex
 
 ```sh
 rextex inline --block BLOCK           # 在某个面板里原地渲染（--on / --off）
+rextex restore                        # 在原来开着的面板里重新打开渲染（Rex 启动时会自动运行）
 rextex view paper.tex                 # 在当前面板里跟随一个文件
 rextex view --block BLOCK             # 跟随一个面板
 rextex show '\int_0^1 x^2\,dx'        # 直接画在当前终端里
@@ -134,6 +137,7 @@ require("rextex").setup{ key = "cmd+shift+m" }
 | `where` | `"right"` | 公式面板打开的位置：`"right"`、`"below"` 或 `"float"`。 |
 | `ratio` | `0.4` | 公式面板占的比例。 |
 | `zoom` | `1.3` | 公式面板里公式相对文字的大小。 |
+| `restore` | `true` | Rex 服务端重新启动后，在原来开着原地渲染的面板里自动恢复。 |
 | `bin` | `~/.local/bin/rextex` | `rextex` 命令的路径。 |
 
 ## 限制

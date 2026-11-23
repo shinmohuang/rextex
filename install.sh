@@ -46,6 +46,8 @@ if [ "$uninstall" -eq 1 ]; then
   strip_block
   rm -f "$bin_dir/rextex" "$config_dir/rextex.lua"
   [ -L "$skill_dir" ] && rm -f "$skill_dir"
+  # The panes to turn rendering back on in, and the renderers' log.
+  rm -rf "${XDG_STATE_HOME:-$HOME/.local/state}/rextex"
   reload
   echo "Removed rextex."
   exit 0
